@@ -1,0 +1,9 @@
+{
+  "model": "qwen2.5:3b",
+  "auto_start": false,
+  "theme": "dark",
+  "notifications": true,
+  "max_history": 20,
+  "window_minimize_to_tray": true,
+  "active_session": "session_77ffaae28569"
+}

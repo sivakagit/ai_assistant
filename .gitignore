@@ -27,12 +27,12 @@ models/
 *.bin
 *.gguf
 
-# Runtime data
-memory.json
-tasks.json
-conversation.json
-conversations/
-config.json
+# # Runtime data
+# memory.json
+# tasks.json
+# conversation.json
+# conversations/
+# config.json
 
 # VS Code
 .vscode/
