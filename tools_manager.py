@@ -1,4 +1,4 @@
-from tools import open_app
+from system_actions import open_app as _sys_open_app
 
 from memory import (
     save_memory,
@@ -64,7 +64,7 @@ def open_app_tool(text):
 
         return "Please specify an application"
 
-    return open_app(app)
+    return _sys_open_app(text)
 
 
 # ---------- REMEMBER TOOL ----------
@@ -589,3 +589,75 @@ def last_screen_tool(text: str) -> str:
 registry.register("read_screen", read_screen_tool)
 registry.register("screenshot",  screenshot_tool)
 registry.register("last_screen", last_screen_tool)
+
+
+# ---------- ACCESSIBILITY / SCREEN EXPLANATION / NAV TOOLS ----------
+
+from screen_reader import explain_screen, read_handwriting as _read_handwriting
+from accessibility import AccessibilityEngine
+from tts import speak_async as _speak_async, stop as _stop_tts
+
+_acc = AccessibilityEngine(speak_fn=_speak_async, stop_fn=_stop_tts)
+
+
+def explain_screen_tool(text: str) -> str:
+    question = text.lower()
+    for prefix in ("explain screen", "explain my screen", "describe screen",
+                   "describe my screen", "what is on my screen", "what's on my screen",
+                   "whats on my screen", "what do you see on screen",
+                   "tell me what's on screen", "tell me what is on screen",
+                   "what app is open", "what application is open",
+                   "what window is open", "what am i looking at",
+                   "describe what you see", "explain what you see"):
+        if question.startswith(prefix):
+            question = question[len(prefix):].strip()
+            break
+    return explain_screen(question=question or "")
+
+
+def read_handwriting_tool(text: str) -> str:
+    # Extract a file path from the command if present
+    import re
+    match = re.search(r'["\']?([a-zA-Z]:\\[^\'"]+|/[^\'"]+\.[a-zA-Z]{2,5})["\']?', text)
+    if match:
+        return _read_handwriting(match.group(1))
+    return "Please provide a path to the image file, e.g. 'read handwriting C:\\scans\\page1.png'"
+
+
+def nav_focus_tool(text: str) -> str:
+    return _acc.get_focused_element()
+
+
+def nav_title_tool(text: str) -> str:
+    return _acc.get_active_window_title()
+
+
+def nav_windows_tool(text: str) -> str:
+    return _acc.list_open_windows()
+
+
+def nav_clipboard_tool(text: str) -> str:
+    return _acc.read_clipboard()
+
+
+def nav_auto_tool(text: str) -> str:
+    return _acc.toggle_auto_announce()
+
+
+def nav_next_window_tool(text: str) -> str:
+    return _acc.switch_to_next_window()
+
+
+def nav_prev_window_tool(text: str) -> str:
+    return _acc.switch_to_prev_window()
+
+
+registry.register("explain_screen",   explain_screen_tool)
+registry.register("read_handwriting",  read_handwriting_tool)
+registry.register("nav_focus",         nav_focus_tool)
+registry.register("nav_title",         nav_title_tool)
+registry.register("nav_windows",       nav_windows_tool)
+registry.register("nav_clipboard",     nav_clipboard_tool)
+registry.register("nav_auto",          nav_auto_tool)
+registry.register("nav_next_window",   nav_next_window_tool)
+registry.register("nav_prev_window",   nav_prev_window_tool)

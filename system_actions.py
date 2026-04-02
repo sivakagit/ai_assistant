@@ -1,6 +1,38 @@
 import os
 import subprocess
 
+# ---------- START MENU SCAN (fallback for unknown apps) ----------
+
+_START_MENU_PATHS = [
+    r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs",
+    os.path.expandvars(r"%APPDATA%\Microsoft\Windows\Start Menu\Programs"),
+]
+
+_SPECIAL_LOCATIONS = {
+    "thispc":        "explorer shell:MyComputerFolder",
+    "my computer":   "explorer shell:MyComputerFolder",
+    "file explorer": "explorer",
+    "documents":     "explorer shell:Personal",
+    "downloads":     "explorer shell:Downloads",
+    "desktop":       "explorer shell:Desktop",
+}
+
+
+def _scan_start_menu():
+    apps = {}
+    for path in _START_MENU_PATHS:
+        if not os.path.exists(path):
+            continue
+        for root, dirs, files in os.walk(path):
+            for file in files:
+                if file.endswith(".lnk"):
+                    name = file.replace(".lnk", "").lower()
+                    apps[name] = os.path.join(root, file)
+    return apps
+
+
+_START_MENU_APPS = _scan_start_menu()
+
 
 # ---------- APP NAME → PROCESS / EXECUTABLE MAP ----------
 
@@ -69,18 +101,36 @@ def open_app(user_input: str) -> str:
         except Exception as e:
             return f"Failed to open {key}: {e}"
 
+    # Special locations (This PC, Downloads, etc.)
+    for loc_name, loc_cmd in _SPECIAL_LOCATIONS.items():
+        if loc_name in user_input.lower():
+            try:
+                subprocess.Popen(loc_cmd, shell=True)
+                return f"Opening {loc_name}"
+            except Exception as e:
+                return f"Failed to open {loc_name}: {e}"
+
     # Generic fallback — try to shell-execute whatever word follows open/launch/start
     words = user_input.lower().split()
     for trigger in ("open", "launch", "start"):
         if trigger in words:
             idx = words.index(trigger)
             if idx + 1 < len(words):
-                app_word = words[idx + 1]
+                app_word = " ".join(words[idx + 1:])
+                # Try Start Menu scan first
+                for name, path in _START_MENU_APPS.items():
+                    if app_word in name:
+                        try:
+                            os.startfile(path)
+                            return f"Opening {name}"
+                        except Exception as e:
+                            return str(e)
+                # Last resort: shell execute
                 try:
-                    subprocess.Popen(app_word, shell=True)
-                    return f"Trying to open '{app_word}'"
+                    subprocess.Popen(words[idx + 1], shell=True)
+                    return f"Trying to open '{words[idx + 1]}'"
                 except Exception as e:
-                    return f"Could not open '{app_word}': {e}"
+                    return f"Could not open '{words[idx + 1]}': {e}"
 
     return "I don't know which app to open. Please be more specific."
 

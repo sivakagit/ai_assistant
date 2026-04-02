@@ -38,7 +38,7 @@ from PySide6.QtCore import (
 import ollama
 
 from tools_manager import registry
-import fix_registry  # noqa: patches registry split bug
+from tts import speak_async, stop
 
 from confirmation_dialog import confirm_action
 
@@ -69,7 +69,7 @@ from conversation import (
 )
 
 from conversation_search import search_conversations
-from conversation_export import export_session, export_all_sessions
+from export import export_session, export_all_sessions
 
 from settings import (
     load_config,
@@ -1482,6 +1482,8 @@ class SearchDialog(QDialog):
 
 class AssistantUI(QWidget):
 
+    _screen_result_signal = Signal(str)
+
     def __init__(self):
 
         super().__init__()
@@ -1490,11 +1492,59 @@ class AssistantUI(QWidget):
 
         self.resize(1150, 720)
 
+        # TTS toggle state — False means muted, True means speaking enabled
+        self._tts_enabled = True
+
         self.apply_styles()
 
         self.build_ui()
 
         self.init_tray()
+
+        self._screen_result_signal.connect(self._on_screen_result)
+
+    def _on_screen_result(self, display: str):
+
+        self.append_assistant(display)
+
+        self._maybe_speak(display)
+
+    def _maybe_speak(self, text: str):
+        if self._tts_enabled:
+        # pyttsx3 on Windows stops at newlines — replace with a pause (space)
+            clean = text.replace("\n", " ").replace("\r", " ").strip()
+            speak_async(clean)
+
+    def _toggle_tts(self):
+        """Toggle TTS on/off and update the button appearance."""
+        self._tts_enabled = not self._tts_enabled
+        if self._tts_enabled:
+            self.tts_toggle_btn.setText("🔊 Voice On")
+            self.tts_toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #0078d4;
+                    color: white;
+                    border: none;
+                    padding: 8px 14px;
+                    border-radius: 6px;
+                    font-size: 12px;
+                }
+                QPushButton:hover { background-color: #2893ff; }
+            """)
+        else:
+            stop()
+            self.tts_toggle_btn.setText("🔇 Voice Off")
+            self.tts_toggle_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #444444;
+                    color: #aaaaaa;
+                    border: 1px solid #555555;
+                    padding: 8px 14px;
+                    border-radius: 6px;
+                    font-size: 12px;
+                }
+                QPushButton:hover { background-color: #555555; }
+            """)
 
     def init_tray(self):
 
@@ -1781,6 +1831,26 @@ class AssistantUI(QWidget):
 
         send_button = QPushButton("Send")
 
+        # ── TTS toggle button ─────────────────────────────────────────────────
+
+        self.tts_toggle_btn = QPushButton("🔊 Voice On")
+
+        self.tts_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #0078d4;
+                color: white;
+                border: none;
+                padding: 8px 14px;
+                border-radius: 6px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #2893ff; }
+        """)
+
+        self.tts_toggle_btn.setToolTip("Toggle voice output on/off")
+
+        self.tts_toggle_btn.clicked.connect(self._toggle_tts)
+
         exit_button = QPushButton("Exit")
 
         exit_button.setStyleSheet("""
@@ -1803,6 +1873,8 @@ class AssistantUI(QWidget):
         input_layout.addWidget(self.input_box)
 
         input_layout.addWidget(send_button)
+
+        input_layout.addWidget(self.tts_toggle_btn)
 
         input_layout.addWidget(exit_button)
 
@@ -2262,20 +2334,33 @@ class AssistantUI(QWidget):
             return
 
         if _intent == "read_screen":
-            from screen_reader import read_screen as _rs
-            result = _rs()
-            self.append_assistant(result if result else "No text detected on screen.")
+            self.append_assistant("Reading screen, please wait...")
+
+            def _do_read_screen():
+                from screen_reader import read_screen as _rs
+                result = _rs()
+                display = result if result else "No text detected on screen."
+                self._screen_result_signal.emit(display)
+
+            Thread(target=_do_read_screen, daemon=True).start()
             return
 
         if _intent == "screenshot":
-            from screen_reader import screenshot_to_file as _ss
-            path = _ss()
-            self.append_assistant(f"Screenshot saved:\n{path}")
+            self.append_assistant("Taking screenshot...")
+
+            def _do_screenshot():
+                from screen_reader import screenshot_to_file as _ss
+                path = _ss()
+                self._screen_result_signal.emit(f"Screenshot saved:\n{path}")
+
+            Thread(target=_do_screenshot, daemon=True).start()
             return
 
         if _intent == "last_screen":
             from screen_reader import last_screen_text as _ls
-            self.append_assistant(_ls())
+            result = _ls()
+            self.append_assistant(result)
+            self._maybe_speak(result)
             return
 
         # --- Normal command / chat flow ---
@@ -2285,6 +2370,8 @@ class AssistantUI(QWidget):
         if tool_response is not None:
 
             self.append_assistant(tool_response)
+
+            self._maybe_speak(tool_response)
 
             return
 
@@ -2332,6 +2419,8 @@ class AssistantUI(QWidget):
     def stream_finished(self):
 
         self.append_assistant(self._stream_buffer)
+
+        self._maybe_speak(self._stream_buffer)
 
         self._stream_buffer = ""
 

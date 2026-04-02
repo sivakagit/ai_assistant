@@ -1,6 +1,5 @@
 from system_actions import (
     close_app,
-    open_app,
     close_external_app,
     shutdown_pc,
     restart_pc,
@@ -35,8 +34,6 @@ registry = ToolRegistry()
 # ---------- REGISTER SYSTEM ACTIONS ----------
 
 registry.register("close_app",          close_app)
-
-registry.register("open_app",           open_app)
 
 registry.register("close_external_app", close_external_app)
 
