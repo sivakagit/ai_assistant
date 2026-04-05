@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+assistant/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Build files
+dist/
+build/
+*.exe
+
+# Models
+models/
+*.bin
+*.gguf
+
+# # Runtime data
+# memory.json
+# tasks.json
+# conversation.json
+# conversations/
+# config.json
+
+# VS Code
+.vscode/
