@@ -203,29 +203,10 @@ def detect_intent(text):
 
     # ---------- OPEN APP ----------
 
-    if any(
+    _open_triggers = ["open", "launch", "start", "run"]
 
-        phrase in text for phrase in [
-
-            "open chrome",
-            "launch",
-            "start calculator",
-            "open calculator",
-            "open notepad",
-            "open paint",
-            "open explorer",
-            "open word",
-            "open excel",
-            "open vlc",
-            "open spotify",
-            "open discord",
-            "open vscode",
-            "open vs code",
-            "open task manager"
-
-        ]
-
-    ):
+    if any(trigger in text for trigger in _open_triggers) and \
+       any(app in text for app in _known_apps):
 
         return "open_app"
 
@@ -255,8 +236,12 @@ def detect_intent(text):
         phrase in text for phrase in [
 
             "what is the time",
+            "what's the time",
+            "whats the time",
             "current time",
-            "time now"
+            "time now",
+            "what time is it",
+            "tell me the time"
 
         ]
 
@@ -273,7 +258,12 @@ def detect_intent(text):
         phrase in text for phrase in [
 
             "what is the date",
-            "today date"
+            "what's the date",
+            "whats the date",
+            "today date",
+            "today's date",
+            "what day is it",
+            "current date"
 
         ]
 
@@ -392,6 +382,17 @@ def detect_intent(text):
         "show last screen",
     ]):
         return "last_screen"
+
+    # ---------- FALLBACK TOOL MATCH ----------
+    # If nothing matched above, check if any registered tool name appears in the text.
+    # Import here to avoid circular imports at module level.
+    try:
+        from tools.registry import registry as _registry
+        for name in _registry.tools:
+            if name in text:
+                return name
+    except Exception:
+        pass
 
     # ---------- DEFAULT ----------
 

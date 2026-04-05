@@ -173,15 +173,25 @@ def search_file_tool(text):
 
             break
 
+    # Strip filler words that aren't part of the filename
+    for filler in ("for", "a", "the", "file", "named", "called"):
+        if query.startswith(filler + " "):
+            query = query[len(filler):].strip()
+
     if not query:
 
         return "Please specify what to search for"
 
+    # Run search — file_tools.search_files() already enforces a timeout
+    # internally so this call will return in at most ~10 seconds.
     results = tools.file_tools.search_files(query)
 
     if not results:
 
-        return "No files found"
+        return (
+            f"No files found matching '{query}'.\n"
+            "Tip: Try a shorter keyword, e.g. 'find report' instead of 'find my report file'."
+        )
 
     numbered = []
 
@@ -191,7 +201,7 @@ def search_file_tool(text):
             f"{i}. {path}"
         )
 
-    return "\n".join(numbered)
+    return f"Found {len(results)} file(s):\n" + "\n".join(numbered)
 
 
 # ---------- OPEN FILE TOOL ----------

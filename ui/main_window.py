@@ -1493,6 +1493,7 @@ class SearchDialog(QDialog):
 class AssistantUI(QWidget):
 
     _screen_result_signal = Signal(str)
+    _tool_result_signal   = Signal(str)   # for threaded tool responses
 
     def __init__(self):
 
@@ -1515,11 +1516,17 @@ class AssistantUI(QWidget):
         self.init_tray()
 
         self._screen_result_signal.connect(self._on_screen_result)
+        self._tool_result_signal.connect(self._on_tool_result)
 
     def _on_screen_result(self, display: str):
 
         self.append_assistant(display)
 
+        self._maybe_speak(display)
+
+    def _on_tool_result(self, display: str):
+        """Called on the UI thread after a background tool finishes."""
+        self.append_assistant(display)
         self._maybe_speak(display)
 
     def _maybe_speak(self, text: str):
@@ -1638,6 +1645,7 @@ class AssistantUI(QWidget):
         self.start_health_timer()
 
         return container
+
     def start_health_timer(self):
 
         self.health_timer = QTimer()
@@ -1893,6 +1901,8 @@ class AssistantUI(QWidget):
 
             event.accept()
 
+            from core.shutdown_manager import shutdown
+
             shutdown()
 
     def build_ui(self):
@@ -2090,7 +2100,7 @@ class AssistantUI(QWidget):
         self.add_sidebar_item("💬", "Chat")
         self.add_sidebar_item("≡", "Sessions")
         self.add_sidebar_item("☑", "Tasks")
-        self.add_sidebar_item("🔧", "Tools")
+        self.add_sidebar_item("❓", "Help")
         self.add_sidebar_item("〜", "Health")
         self.add_sidebar_item("⚙", "Settings")
         self.sidebar.currentRowChanged.connect(self.switch_page)
@@ -2109,7 +2119,7 @@ class AssistantUI(QWidget):
         self.chat_page     = self.build_chat_page()
         self.sessions_page = self.build_sessions_page()
         self.tasks_page    = self.build_tasks_page()
-        self.tools_page    = self.build_tools_page()
+        self.tools_page    = self.build_tools_page()   # now the /help page
         self.health_page   = self.build_health_page()
         self.settings_page = self.build_settings_page()
 
@@ -2163,8 +2173,8 @@ class AssistantUI(QWidget):
 
             widget.setVisible(False)
 
-        # Sidebar: Chat(0) Sessions(1) Tasks(2) Tools(3) Health(4) Settings(5)
-        # Pages:   chat(0) sessions(1) tasks(2) tools(3) health(4) settings(5)
+        # Sidebar: Chat(0) Sessions(1) Tasks(2) Help(3) Health(4) Settings(5)
+        # Pages:   chat(0) sessions(1) tasks(2) help(3) health(4) settings(5)
         page_map = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
         page_index = page_map.get(index, 0)
 
@@ -2971,18 +2981,41 @@ class AssistantUI(QWidget):
             return
 
         # --- Normal command / chat flow ---
+        # Run handle_command in a background thread so slow tools
+        # (e.g. file search) never freeze the UI.
 
-        tool_response = handle_command(message)
+        def _run_tool():
+            tool_response = handle_command(message)
+            if tool_response is not None:
+                self._tool_result_signal.emit(tool_response)
+            else:
+                # No tool matched — fall back to LLM stream on the UI thread
+                # We must call start_stream via the signal so it runs safely.
+                self._tool_result_signal.emit("")  # sentinel: empty = use LLM
 
-        if tool_response is not None:
+        def _on_tool_done(response):
+            if response == "":
+                self.start_stream(message)
+            # non-empty responses are already handled by _on_tool_result
 
-            self.append_assistant(tool_response)
+        # Temporarily reroute the signal for this call
+        # (simpler: just use a wrapper thread + QTimer for the LLM fallback)
+        _intent_check = detect_intent(message.lower())
+        _is_tool_intent = _intent_check != "chat"
 
-            self._maybe_speak(tool_response)
+        if _is_tool_intent:
+            self.append_assistant("Working on it...")
 
-            return
+            def _bg():
+                tool_response = handle_command(message)
+                if tool_response is not None:
+                    self._tool_result_signal.emit(tool_response)
+                else:
+                    self._tool_result_signal.emit("\u26a0\ufe0f No response from tool.")
 
-        self.start_stream(message)
+            Thread(target=_bg, daemon=True).start()
+        else:
+            self.start_stream(message)
 
     def append_user(self, message):
         from PySide6.QtGui import QTextCursor, QTextBlockFormat
@@ -3119,75 +3152,327 @@ class AssistantUI(QWidget):
         self._maybe_speak(self._stream_buffer)
         self._stream_buffer = ""
 
+    # ---------- /HELP PAGE ----------
+
     def build_tools_page(self):
+        """Help page — explains every tool with usage examples."""
+
+        TOOL_HELP = [
+            {
+                "icon": "▶",
+                "name": "Open App",
+                "category": "System",
+                "desc": "Launch any application installed on your computer.",
+                "examples": ["open notepad", "open chrome", "launch calculator", "start vlc"],
+            },
+            {
+                "icon": "✕",
+                "name": "Close App",
+                "category": "System",
+                "desc": "Close the assistant application.",
+                "examples": ["close app", "exit assistant", "quit"],
+            },
+            {
+                "icon": "⚡",
+                "name": "Kill Process",
+                "category": "System",
+                "desc": "Force-terminate a running process by name.",
+                "examples": ["kill notepad", "kill chrome", "kill process explorer"],
+            },
+            {
+                "icon": "⏻",
+                "name": "Shutdown PC",
+                "category": "System",
+                "desc": "Shut down your computer. Requires confirmation.",
+                "examples": ["shutdown pc", "shut down computer", "power off"],
+            },
+            {
+                "icon": "↺",
+                "name": "Restart PC",
+                "category": "System",
+                "desc": "Restart your computer. Requires confirmation.",
+                "examples": ["restart pc", "reboot computer", "restart my machine"],
+            },
+            {
+                "icon": "📸",
+                "name": "Screenshot",
+                "category": "Screen",
+                "desc": "Take a screenshot and save it to disk.",
+                "examples": ["take screenshot", "capture screen", "screenshot now"],
+            },
+            {
+                "icon": "👁",
+                "name": "Read Screen",
+                "category": "Screen",
+                "desc": "Extract and read all visible text on your screen using OCR.",
+                "examples": ["read my screen", "read screen", "what's on my screen"],
+            },
+            {
+                "icon": "📋",
+                "name": "Last Screen Text",
+                "category": "Screen",
+                "desc": "Recall the text extracted during the previous screen read.",
+                "examples": ["show last screen text", "what did you read last"],
+            },
+            {
+                "icon": "🖥",
+                "name": "System Info",
+                "category": "Info",
+                "desc": "Display CPU, RAM, OS, and hardware information.",
+                "examples": ["system info", "show system info", "what are my specs"],
+            },
+            {
+                "icon": "⏱",
+                "name": "Get Time",
+                "category": "Info",
+                "desc": "Tell you the current local time.",
+                "examples": ["what time is it", "current time", "what's the time"],
+            },
+            {
+                "icon": "📆",
+                "name": "Get Date",
+                "category": "Info",
+                "desc": "Tell you today's date.",
+                "examples": ["what's today's date", "what day is it", "today's date"],
+            },
+            {
+                "icon": "📅",
+                "name": "Schedule Task",
+                "category": "Scheduler",
+                "desc": "Schedule a reminder or command to run at a specific time.",
+                "examples": [
+                    "remind me to drink water in 30 minutes",
+                    "schedule a task at 5pm",
+                    "set a reminder for tomorrow 9am",
+                ],
+            },
+            {
+                "icon": "📋",
+                "name": "List Tasks",
+                "category": "Scheduler",
+                "desc": "Show all currently scheduled tasks and their status.",
+                "examples": ["show tasks", "list tasks", "what tasks are scheduled"],
+            },
+            {
+                "icon": "🔍",
+                "name": "Search File",
+                "category": "Files",
+                "desc": "Search for a file by name across your drives.",
+                "examples": ["search file report.pdf", "find file budget.xlsx"],
+            },
+            {
+                "icon": "💬",
+                "name": "AI Chat",
+                "category": "Chat",
+                "desc": "Ask anything — if no tool matches, your question goes to the AI model.",
+                "examples": [
+                    "explain quantum computing",
+                    "write a poem about rain",
+                    "what is the capital of France",
+                ],
+            },
+        ]
+
+        CATEGORY_COLORS = {
+            "System":    ("#7c3aed", "#1c1029"),
+            "Screen":    ("#0ea5e9", "#071a26"),
+            "Info":      ("#10b981", "#071a16"),
+            "Scheduler": ("#f59e0b", "#1f1508"),
+            "Files":     ("#f97316", "#1f1108"),
+            "Chat":      ("#ec4899", "#1f0a14"),
+        }
 
         container = QWidget()
         container.setStyleSheet("background-color: #0d1117;")
 
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(32, 28, 32, 24)
-        layout.setSpacing(16)
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        title = QLabel("Available Tools")
-        title.setStyleSheet("font-size: 22px; font-weight: 700; color: #e6edf3; letter-spacing: -0.4px;")
-        layout.addWidget(title)
+        # ── Top bar ───────────────────────────────────────────────────────────
+        top_bar = QFrame()
+        top_bar.setFixedHeight(62)
+        top_bar.setStyleSheet("background-color: #0d1117; border-bottom: 1px solid #21262d;")
+        top_h = QHBoxLayout(top_bar)
+        top_h.setContentsMargins(32, 0, 32, 0)
+        top_h.setSpacing(12)
 
-        subtitle = QLabel("Registered tools and system capabilities")
-        subtitle.setStyleSheet("color: #484f58; font-size: 12px; margin-top: -12px;")
-        layout.addWidget(subtitle)
+        title_lbl = QLabel("/help  —  Command Reference")
+        title_lbl.setStyleSheet(
+            "font-size: 16px; font-weight: 700; color: #e6edf3; font-family: 'Consolas', monospace;"
+        )
+        top_h.addWidget(title_lbl)
+        top_h.addStretch()
 
-        tools_list = QListWidget()
-        tools_list.setStyleSheet("""
-            QListWidget {
+        count_pill = QLabel(f"  {len(TOOL_HELP)} tools  ")
+        count_pill.setFixedHeight(26)
+        count_pill.setStyleSheet("""
+            QLabel {
                 background-color: #161b22;
-                border: 1px solid #21262d;
-                border-radius: 10px;
-                outline: none;
-            }
-            QListWidget::item {
-                padding: 13px 16px;
-                border-bottom: 1px solid #21262d;
-                color: #c9d1d9;
-                font-size: 13px;
-            }
-            QListWidget::item:selected {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #6e40c9,stop:1 #8b5cf6);
-                color: #ffffff;
-            }
-            QListWidget::item:hover:!selected {
-                background-color: #21262d;
-                color: #e6edf3;
+                color: #8b949e;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 11px;
             }
         """)
+        top_h.addWidget(count_pill)
 
-        tool_icons = {
-            "close_app":    "✕",
-            "shutdown_pc":  "⏻",
-            "restart_pc":   "↺",
-            "kill_process": "⚡",
-            "open_app":     "▶",
-            "search_file":  "🔍",
-            "schedule_task":"📅",
-            "system_info":  "🖥",
-            "get_time":     "⏱",
-            "get_date":     "📆",
-            "screenshot":   "📸",
-            "read_screen":  "👁",
-        }
+        # Search filter
+        self._help_search = QLineEdit()
+        self._help_search.setPlaceholderText("🔍  Filter commands…")
+        self._help_search.setFixedWidth(200)
+        self._help_search.setFixedHeight(32)
+        self._help_search.setStyleSheet("""
+            QLineEdit {
+                background-color: #161b22;
+                color: #c9d1d9;
+                border: 1px solid #30363d;
+                border-radius: 7px;
+                padding: 4px 12px;
+                font-size: 12px;
+            }
+            QLineEdit:focus { border-color: #7c3aed; }
+        """)
+        self._help_search.textChanged.connect(self._filter_help_cards)
+        top_h.addWidget(self._help_search)
 
-        for tool_name in registry.list_tools():
-            icon = tool_icons.get(tool_name, "🔧")
-            item = QListWidgetItem(f"{icon}  {tool_name}")
-            item.setData(Qt.UserRole, tool_name)
-            tools_list.addItem(item)
+        outer.addWidget(top_bar)
 
-        count_label = QLabel(f"{len(registry.list_tools())} tools registered")
-        count_label.setStyleSheet("color: #484f58; font-size: 11px;")
+        # ── Scrollable card grid ──────────────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
-        layout.addWidget(tools_list)
-        layout.addWidget(count_label)
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background-color: #0d1117;")
+
+        self._help_grid = QVBoxLayout(scroll_content)
+        self._help_grid.setContentsMargins(32, 24, 32, 32)
+        self._help_grid.setSpacing(10)
+
+        # Store card widgets for filtering
+        self._help_cards = []
+
+        for tool in TOOL_HELP:
+            cat = tool["category"]
+            accent, bg = CATEGORY_COLORS.get(cat, ("#7c3aed", "#1c1029"))
+
+            card = QFrame()
+            card.setObjectName("helpCard")
+            card.setStyleSheet(f"""
+                QFrame#helpCard {{
+                    background-color: #161b22;
+                    border: 1px solid #21262d;
+                    border-radius: 12px;
+                }}
+                QFrame#helpCard:hover {{
+                    border-color: {accent};
+                    background-color: #1c2128;
+                }}
+            """)
+
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(18, 14, 18, 14)
+            card_layout.setSpacing(6)
+
+            # Row 1: icon + name + category badge
+            row1 = QHBoxLayout()
+            row1.setSpacing(10)
+
+            icon_lbl = QLabel(tool["icon"])
+            icon_lbl.setFixedSize(32, 32)
+            icon_lbl.setAlignment(Qt.AlignCenter)
+            icon_lbl.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg};
+                    border: 1px solid {accent}44;
+                    border-radius: 8px;
+                    font-size: 14px;
+                }}
+            """)
+
+            name_lbl = QLabel(tool["name"])
+            name_lbl.setStyleSheet(
+                "color: #e6edf3; font-size: 14px; font-weight: 700; background: transparent;"
+            )
+
+            cat_badge = QLabel(f"  {cat}  ")
+            cat_badge.setFixedHeight(20)
+            cat_badge.setStyleSheet(f"""
+                QLabel {{
+                    background-color: {bg};
+                    color: {accent};
+                    border: 1px solid {accent}55;
+                    border-radius: 5px;
+                    font-size: 10px;
+                    font-weight: 600;
+                    padding: 0 6px;
+                }}
+            """)
+
+            row1.addWidget(icon_lbl)
+            row1.addWidget(name_lbl)
+            row1.addStretch()
+            row1.addWidget(cat_badge)
+            card_layout.addLayout(row1)
+
+            # Row 2: description
+            desc_lbl = QLabel(tool["desc"])
+            desc_lbl.setWordWrap(True)
+            desc_lbl.setStyleSheet("color: #8b949e; font-size: 12px; background: transparent;")
+            card_layout.addWidget(desc_lbl)
+
+            # Row 3: examples as inline chips
+            examples_row = QHBoxLayout()
+            examples_row.setSpacing(6)
+            examples_row.setAlignment(Qt.AlignLeft)
+
+            eg_intro = QLabel("Try:")
+            eg_intro.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+            examples_row.addWidget(eg_intro)
+
+            for ex in tool["examples"]:
+                chip = QLabel(f'"{ex}"')
+                chip.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: #0d1117;
+                        color: {accent};
+                        border: 1px solid #30363d;
+                        border-radius: 5px;
+                        padding: 2px 8px;
+                        font-size: 11px;
+                        font-family: 'Consolas', monospace;
+                    }}
+                """)
+                examples_row.addWidget(chip)
+
+            examples_row.addStretch()
+            card_layout.addLayout(examples_row)
+
+            self._help_grid.addWidget(card)
+            self._help_cards.append((tool, card))
+
+        self._help_grid.addStretch()
+        scroll.setWidget(scroll_content)
+        outer.addWidget(scroll)
 
         return container
+
+    def _filter_help_cards(self, query):
+        """Show/hide help cards based on search query."""
+        q = query.strip().lower()
+        for tool, card in self._help_cards:
+            if not q:
+                card.setVisible(True)
+            else:
+                haystack = (
+                    tool["name"] + tool["desc"] + tool["category"] +
+                    " ".join(tool["examples"])
+                ).lower()
+                card.setVisible(q in haystack)
 
     def build_tasks_page(self):
 
