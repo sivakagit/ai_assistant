@@ -127,14 +127,61 @@ def detect_intent(text):
 
 
 
+    # ---------- WEATHER ----------
+
+    if any(phrase in text for phrase in [
+        "weather in",
+        "weather for",
+        "weather at",
+        "weather today",
+        "what's the weather",
+        "what is the weather",
+        "how's the weather",
+        "how is the weather",
+        "current weather",
+        "temperature in",
+        "is it raining",
+        "will it rain",
+        "forecast for",
+        "forecast in",
+    ]):
+        return "weather"
+
+    # plain "weather" as its own word — avoid matching "whether"
+    if text == "weather" or text.startswith("weather "):
+        return "weather"
+
+
+
+    # ---------- WEB SEARCH ----------
+
+    if any(phrase in text for phrase in [
+        "search the web for",
+        "search web for",
+        "web search for",
+        "web search",
+        "search the web",
+        "google ",
+        "look up",
+        "find info on",
+        "find information on",
+        "search for",
+        "browse for",
+        "internet search",
+    ]):
+        return "web_search"
+
+
+
     # ---------- FILE SEARCH ----------
+    # NOTE: kept AFTER web_search so "search for X" goes to web_search,
+    # but "find file X" / "locate X" still hits search_file.
 
-    if text.startswith(
+    if text.startswith(("find file", "locate ", "search file")):
+        return "search_file"
 
-        ("find ", "search ", "locate ")
-
-    ):
-
+    # Generic "find" / "search" with no web-search trigger → file search
+    if text.startswith(("find ", "search ")):
         return "search_file"
 
 
@@ -291,34 +338,34 @@ def detect_intent(text):
 
         return "kill_process"
 
-# ---------- ACCESSIBILITY NAVIGATION ----------
+    # ---------- ACCESSIBILITY NAVIGATION ----------
 
     if text in [
         "read focus",
         "current item",
         "what is selected"
-]:
+    ]:
         return "read_focus"
 
     if text in [
         "next",
         "next item",
         "next element"
-]:
+    ]:
         return "next_element"
 
     if text in [
         "previous",
         "previous item",
         "go back"
-]:
+    ]:
         return "previous_element"
 
     if text in [
         "click",
         "activate",
         "press enter"
-]:
+    ]:
         return "activate_element"
 
     if text.startswith("type "):
@@ -326,18 +373,18 @@ def detect_intent(text):
 
     if text in [
         "scroll down"
-]:
+    ]:
         return "scroll_down"
 
     if text in [
         "scroll up"
-]:
+    ]:
         return "scroll_up"
 
     if text in [
         "where am i",
         "current window"
-]:
+    ]:
         return "where_am_i"
 
     # ---------- SCREEN READER ----------
@@ -385,7 +432,6 @@ def detect_intent(text):
 
     # ---------- FALLBACK TOOL MATCH ----------
     # If nothing matched above, check if any registered tool name appears in the text.
-    # Import here to avoid circular imports at module level.
     try:
         from tools.registry import registry as _registry
         for name in _registry.tools:

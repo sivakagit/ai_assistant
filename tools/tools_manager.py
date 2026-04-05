@@ -35,7 +35,6 @@ import os
 import shutil
 
 
-
 # ---------- OPEN APP TOOL ----------
 
 def open_app_tool(text):
@@ -182,8 +181,6 @@ def search_file_tool(text):
 
         return "Please specify what to search for"
 
-    # Run search — file_tools.search_files() already enforces a timeout
-    # internally so this call will return in at most ~10 seconds.
     results = tools.file_tools.search_files(query)
 
     if not results:
@@ -528,33 +525,34 @@ def task_management_tool(text):
     return "Unknown task command"
 
 
+# ---------- WEB SEARCH TOOL ----------
+
+from tools.web_search_tool import web_search_tool
+
+
+# ---------- WEATHER TOOL ----------
+
+from tools.weather_tool import weather_tool
+
+
 # ---------- REGISTER TOOLS ----------
 
-registry.register("open_app", open_app_tool)
-
-registry.register("remember", remember_tool)
-
-registry.register("show_memory", show_memory_tool)
-
+registry.register("open_app",           open_app_tool)
+registry.register("remember",           remember_tool)
+registry.register("show_memory",        show_memory_tool)
 registry.register("clear_conversation", clear_conversation_tool)
+registry.register("search_file",        search_file_tool)
+registry.register("open_file",          open_file_tool)
+registry.register("system_info",        system_info_tool)
+registry.register("run_python",         run_python_tool)
+registry.register("file_operation",     file_operation_tool)
+registry.register("schedule_task",      schedule_task_tool)
+registry.register("get_time",           get_time_tool)
+registry.register("get_date",           get_date_tool)
+registry.register("task_management",    task_management_tool)
+registry.register("web_search",         web_search_tool)
+registry.register("weather",            weather_tool)
 
-registry.register("search_file", search_file_tool)
-
-registry.register("open_file", open_file_tool)
-
-registry.register("system_info", system_info_tool)
-
-registry.register("run_python", run_python_tool)
-
-registry.register("file_operation", file_operation_tool)
-
-registry.register("schedule_task", schedule_task_tool)
-
-registry.register("get_time", get_time_tool)
-
-registry.register("get_date", get_date_tool)
-
-registry.register("task_management", task_management_tool)
 
 # ---------- SCREEN READER TOOLS ----------
 
@@ -565,7 +563,6 @@ from tools.screen_tools import (
 )
 
 def setup_tools():
-
     registry.register(...)
 
 def read_screen_tool(text: str) -> str:
@@ -629,7 +626,6 @@ def explain_screen_tool(text: str) -> str:
 
 
 def read_handwriting_tool(text: str) -> str:
-    # Extract a file path from the command if present
     import re
     match = re.search(r'["\']?([a-zA-Z]:\\[^\'"]+|/[^\'"]+\.[a-zA-Z]{2,5})["\']?', text)
     if match:

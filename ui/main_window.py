@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QSplitter,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
 )
 
 from PySide6.QtCore import (
@@ -2101,36 +2102,39 @@ class AssistantUI(QWidget):
         self.add_sidebar_item("≡", "Sessions")
         self.add_sidebar_item("☑", "Tasks")
         self.add_sidebar_item("❓", "Help")
+        self.add_sidebar_item("🧠", "Memory")
         self.add_sidebar_item("〜", "Health")
         self.add_sidebar_item("⚙", "Settings")
         self.sidebar.currentRowChanged.connect(self.switch_page)
+        # setSizePolicy + setFixedHeight ensures sidebar items never shift
+        self.sidebar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         sidebar_v.addWidget(self.sidebar)
-        sidebar_v.addStretch()
+        # No addStretch() — stretching was causing the sidebar to compress
 
         body_layout.addWidget(sidebar_container)
 
-        # Pages
-        pages_container = QWidget()
-        pages_container.setStyleSheet("background-color: #0d1117;")
-        self.pages = QVBoxLayout(pages_container)
-        self.pages.setContentsMargins(0, 0, 0, 0)
-        self.pages.setSpacing(0)
+        # Pages — QStackedWidget keeps all pages rendered at full size.
+        # Only the current index is visible; the sidebar never shifts.
+        self.pages = QStackedWidget()
+        self.pages.setStyleSheet("background-color: #0d1117;")
 
         self.chat_page     = self.build_chat_page()
         self.sessions_page = self.build_sessions_page()
         self.tasks_page    = self.build_tasks_page()
-        self.tools_page    = self.build_tools_page()   # now the /help page
+        self.tools_page    = self.build_tools_page()
+        self.memory_page   = self.build_memory_page()
         self.health_page   = self.build_health_page()
         self.settings_page = self.build_settings_page()
 
-        self.pages.addWidget(self.chat_page)
-        self.pages.addWidget(self.sessions_page)
-        self.pages.addWidget(self.tasks_page)
-        self.pages.addWidget(self.tools_page)
-        self.pages.addWidget(self.health_page)
-        self.pages.addWidget(self.settings_page)
+        self.pages.addWidget(self.chat_page)      # 0
+        self.pages.addWidget(self.sessions_page)  # 1
+        self.pages.addWidget(self.tasks_page)     # 2
+        self.pages.addWidget(self.tools_page)     # 3
+        self.pages.addWidget(self.memory_page)    # 4
+        self.pages.addWidget(self.health_page)    # 5
+        self.pages.addWidget(self.settings_page)  # 6
 
-        body_layout.addWidget(pages_container)
+        body_layout.addWidget(self.pages)
         main_layout.addWidget(body_widget)
 
         self.sidebar.setCurrentRow(0)
@@ -2166,27 +2170,11 @@ class AssistantUI(QWidget):
         self.sidebar.addItem(item)
 
     def switch_page(self, index):
-
-        for i in range(self.pages.count()):
-
-            widget = self.pages.itemAt(i).widget()
-
-            widget.setVisible(False)
-
-        # Sidebar: Chat(0) Sessions(1) Tasks(2) Help(3) Health(4) Settings(5)
-        # Pages:   chat(0) sessions(1) tasks(2) help(3) health(4) settings(5)
-        page_map = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
-        page_index = page_map.get(index, 0)
-
-        widget = self.pages.itemAt(page_index).widget()
-
-        widget.setVisible(True)
-
-        # Refresh sessions list whenever the sessions tab is opened
-
+        self.pages.setCurrentIndex(index)
         if index == 1:
-
             self._reload_sessions_page()
+        if index == 4:   # Memory page
+            self._reload_memory_page()
 
     def build_chat_page(self):
 
@@ -2293,155 +2281,155 @@ class AssistantUI(QWidget):
         input_outer.setContentsMargins(32, 10, 32, 14)
         input_outer.setSpacing(6)
 
-        # ── Autocomplete commands list ────────────────────────────────────────
+        # ── Autocomplete commands ─────────────────────────────────────────────
         self._autocomplete_commands = [
-            "close app",
-            "shutdown pc",
-            "restart pc",
-            "take screenshot",
-            "read my screen",
-            "system info",
-            "what time is it",
-            "what's today's date",
-            "show tasks",
-            "open app",
-            "kill process",
-            "search file",
-            "new chat",
-            "voice on",
-            "voice off",
+            "open chrome", "open notepad", "open calculator",
+            "open spotify", "open discord", "close chrome",
+            "shutdown pc", "restart pc", "take screenshot",
+            "read my screen", "system info", "what time is it",
+            "what\'s today\'s date", "show tasks", "search file",
         ]
 
-        # Floating popup — parented to the main container so it overlays everything
+        # Compact autocomplete popup
         self._autocomplete_popup = QListWidget(container)
         self._autocomplete_popup.setVisible(False)
         self._autocomplete_popup.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self._autocomplete_popup.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._autocomplete_popup.setFocusPolicy(Qt.NoFocus)
         self._autocomplete_popup.setStyleSheet("""
             QListWidget {
-                background-color: #161b22;
-                border: 1px solid #7c3aed;
+                background-color: #13181f;
+                border: 1px solid #7c3aed88;
                 border-radius: 10px;
                 outline: none;
                 padding: 4px;
             }
             QListWidget::item {
                 color: #c9d1d9;
-                padding: 8px 16px;
+                padding: 6px 14px;
                 border-radius: 6px;
-                font-size: 13px;
+                font-size: 12px;
             }
             QListWidget::item:hover {
-                background-color: #2d1f5e;
+                background-color: #1c1029;
                 color: #e6edf3;
-                cursor: pointer;
+            }
+            QListWidget::item:selected {
+                background-color: #2d1f5e;
+                color: #ffffff;
             }
         """)
 
-        # Input box
+        # ── Clean input box (no attach/mic clutter) ───────────────────────────
         input_box_frame = QFrame()
         input_box_frame.setFixedHeight(52)
         input_box_frame.setStyleSheet("""
             QFrame {
                 background-color: #161b22;
-                border: 1px solid #30363d;
-                border-radius: 12px;
+                border: 1.5px solid #30363d;
+                border-radius: 14px;
             }
         """)
         input_row = QHBoxLayout(input_box_frame)
-        input_row.setContentsMargins(6, 6, 6, 6)
-        input_row.setSpacing(6)
-
-        attach_btn = QPushButton("📎")
-        attach_btn.setFixedSize(34, 34)
-        attach_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: none; font-size: 14px; color: #8b949e; border-radius: 6px; }
-            QPushButton:hover { background: #21262d; }
-        """)
+        input_row.setContentsMargins(16, 0, 6, 0)
+        input_row.setSpacing(8)
 
         self.input_box = QLineEdit()
-        self.input_box.setPlaceholderText("Type your message…")
+        self.input_box.setPlaceholderText("Message Assistant…")
         self.input_box.setStyleSheet("""
             QLineEdit {
                 background-color: transparent;
-                color: #c9d1d9;
+                color: #e6edf3;
                 border: none;
-                padding: 8px 4px;
-                font-size: 13px;
+                padding: 0;
+                font-size: 13.5px;
+                font-family: "Segoe UI", sans-serif;
             }
         """)
         self.input_box.returnPressed.connect(self.send_message)
         self.input_box.textChanged.connect(self._on_input_changed)
 
-        mic_btn = QPushButton("🎤")
-        mic_btn.setFixedSize(34, 34)
-        mic_btn.setStyleSheet("""
-            QPushButton { background: transparent; border: none; font-size: 14px; color: #8b949e; border-radius: 6px; }
-            QPushButton:hover { background: #21262d; }
-        """)
-
         send_button = QPushButton("➤")
-        send_button.setFixedSize(36, 36)
+        send_button.setFixedSize(38, 38)
+        send_button.setCursor(Qt.PointingHandCursor)
         send_button.setStyleSheet("""
             QPushButton {
                 background-color: #7c3aed;
                 color: white;
                 border: none;
-                border-radius: 9px;
-                font-size: 14px;
+                border-radius: 10px;
+                font-size: 15px;
+                padding: 0;
             }
-            QPushButton:hover { background-color: #8b5cf6; }
+            QPushButton:hover  { background-color: #8b5cf6; }
+            QPushButton:pressed { background-color: #6d28d9; }
         """)
         send_button.clicked.connect(self.send_message)
 
-        input_row.addWidget(attach_btn)
         input_row.addWidget(self.input_box)
-        input_row.addWidget(mic_btn)
         input_row.addWidget(send_button)
         input_outer.addWidget(input_box_frame)
 
-        # Store reference to input_box_frame for popup positioning
         self._input_box_frame = input_box_frame
-
-        # connect click on autocomplete item
         self._autocomplete_popup.itemClicked.connect(self._on_autocomplete_select)
-        self._autocomplete_popup.raise_()  # always on top
+        self._autocomplete_popup.raise_()
 
-        # Bottom action row
+        # ── Bottom bar: Voice | hint | Exit ──────────────────────────────────
         action_row = QHBoxLayout()
-        action_row.setSpacing(8)
+        action_row.setSpacing(0)
+        action_row.setContentsMargins(2, 0, 2, 0)
 
         self.tts_toggle_btn = QPushButton("🔊  Voice On")
+        self.tts_toggle_btn.setFixedHeight(26)
+        self.tts_toggle_btn.setCursor(Qt.PointingHandCursor)
         self.tts_toggle_btn.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
-                color: #8b949e;
-                border: 1px solid #30363d;
-                padding: 5px 12px;
-                border-radius: 7px;
+                color: #484f58;
+                border: 1px solid #21262d;
+                padding: 0 12px;
+                border-radius: 6px;
                 font-size: 11px;
             }
-            QPushButton:hover { background-color: #21262d; color: #e6edf3; }
+            QPushButton:hover {
+                background-color: #161b22;
+                color: #8b949e;
+                border-color: #30363d;
+            }
         """)
-        self.tts_toggle_btn.setToolTip("Toggle voice output on/off")
+        self.tts_toggle_btn.setToolTip("Toggle voice on/off")
         self.tts_toggle_btn.clicked.connect(self._toggle_tts)
 
+        hint_lbl = QLabel("Enter to send  ·  type for suggestions")
+        hint_lbl.setStyleSheet(
+            "color: #21262d; font-size: 10px; background: transparent;"
+        )
+        hint_lbl.setAlignment(Qt.AlignCenter)
+
+        from core.shutdown_manager import shutdown
         exit_button = QPushButton("Exit")
+        exit_button.setFixedHeight(26)
+        exit_button.setCursor(Qt.PointingHandCursor)
         exit_button.setStyleSheet("""
             QPushButton {
                 background-color: transparent;
-                color: #f85149;
-                border: 1px solid #6e2a2a;
-                padding: 5px 14px;
-                border-radius: 7px;
+                color: #484f58;
+                border: 1px solid #21262d;
+                padding: 0 14px;
+                border-radius: 6px;
                 font-size: 11px;
             }
-            QPushButton:hover { background-color: #2a1515; border-color: #f85149; }
+            QPushButton:hover {
+                background-color: #2a1515;
+                color: #f85149;
+                border-color: #6e2a2a;
+            }
         """)
-        from core.shutdown_manager import shutdown
         exit_button.clicked.connect(shutdown)
 
         action_row.addWidget(self.tts_toggle_btn)
+        action_row.addStretch()
+        action_row.addWidget(hint_lbl)
         action_row.addStretch()
         action_row.addWidget(exit_button)
         input_outer.addLayout(action_row)
@@ -2816,21 +2804,19 @@ class AssistantUI(QWidget):
             self._autocomplete_popup.setVisible(False)
             return
 
-        for cmd in matches[:6]:
-            item = QListWidgetItem(f"  ⌨  {cmd}")
+        for cmd in matches[:5]:
+            item = QListWidgetItem(f"  {cmd}")
             self._autocomplete_popup.addItem(item)
 
-        # Calculate popup height
-        row_h = 38
-        popup_h = min(len(matches), 6) * row_h + 10
-        popup_w = self._input_box_frame.width()
+        row_h   = 30
+        n       = min(len(matches), 5)
+        popup_h = n * row_h + 12
+        popup_w = min(self._input_box_frame.width(), 320)
 
-        # Position the popup: floating above the input box frame
-        # Map input_box_frame's top-left to the container's coordinate space
         parent_widget = self._autocomplete_popup.parent()
         frame_pos = self._input_box_frame.mapTo(parent_widget, self._input_box_frame.rect().topLeft())
         popup_x = frame_pos.x()
-        popup_y = frame_pos.y() - popup_h - 6  # 6px gap above input
+        popup_y = frame_pos.y() - popup_h - 8
 
         self._autocomplete_popup.setGeometry(popup_x, popup_y, popup_w, popup_h)
         self._autocomplete_popup.setVisible(True)
@@ -2838,7 +2824,7 @@ class AssistantUI(QWidget):
 
     def _on_autocomplete_select(self, item):
         """Complete the input box with the selected suggestion."""
-        cmd = item.text().replace("  ⌨  ", "").strip()
+        cmd = item.text().strip()
         self.input_box.setText(cmd)
         self.input_box.setCursorPosition(len(cmd))
         self._autocomplete_popup.setVisible(False)
@@ -2980,6 +2966,30 @@ class AssistantUI(QWidget):
             self._maybe_speak(result)
             return
 
+        # ── Web search ────────────────────────────────────────────────────────
+        if _intent == "web_search":
+            self.append_assistant("🔍 Searching the web…")
+
+            def _do_web_search():
+                from tools.web_search_tool import web_search_tool as _wst
+                result = _wst(message)
+                self._tool_result_signal.emit(result)
+
+            Thread(target=_do_web_search, daemon=True).start()
+            return
+
+        # ── Weather ───────────────────────────────────────────────────────────
+        if _intent == "weather":
+            self.append_assistant("🌍 Fetching weather…")
+
+            def _do_weather():
+                from tools.weather_tool import weather_tool as _wt
+                result = _wt(message)
+                self._tool_result_signal.emit(result)
+
+            Thread(target=_do_weather, daemon=True).start()
+            return
+
         # --- Normal command / chat flow ---
         # Run handle_command in a background thread so slow tools
         # (e.g. file search) never freeze the UI.
@@ -3059,6 +3069,10 @@ class AssistantUI(QWidget):
         from PySide6.QtGui import QTextCursor, QTextBlockFormat
         import html as _html
 
+        # ── skip the empty "Working on it..." replacement sentinel ────────────
+        if message == "":
+            return
+
         safe = _html.escape(message).replace("\n", "<br>")
 
         cursor = self.chat_display.textCursor()
@@ -3078,6 +3092,9 @@ class AssistantUI(QWidget):
             f'line-height:1.65; white-space:pre-wrap; word-wrap:break-word; max-width:600px;">{safe}</td></tr></table>'
         )
 
+        # ── Copy button — floating overlay ────────────────────────────────────
+        self._add_copy_button(message)
+
         # Reset block
         cursor.insertBlock()
         reset = QTextBlockFormat()
@@ -3090,6 +3107,84 @@ class AssistantUI(QWidget):
         self.chat_display.verticalScrollBar().setValue(
             self.chat_display.verticalScrollBar().maximum()
         )
+
+    def _add_copy_button(self, message: str):
+        """Add a small floating copy button that appears over the last assistant bubble."""
+        from PySide6.QtWidgets import QApplication as _QApp
+
+        btn = QPushButton("⎘ Copy", self.chat_display)
+        btn.setFixedSize(64, 24)
+        btn.setStyleSheet("""
+            QPushButton {
+                background-color: #21262d;
+                color: #8b949e;
+                border: 1px solid #30363d;
+                border-radius: 5px;
+                font-size: 10px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #7c3aed;
+                color: #ffffff;
+                border-color: #7c3aed;
+            }
+        """)
+
+        _msg = message   # capture for closure
+
+        def _copy():
+            _QApp.clipboard().setText(_msg)
+            btn.setText("✓ Copied")
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #0d3321;
+                    color: #3fb950;
+                    border: 1px solid #238636;
+                    border-radius: 5px;
+                    font-size: 10px;
+                    font-weight: 500;
+                }
+            """)
+            QTimer.singleShot(1500, lambda: (
+                btn.setText("⎘ Copy"),
+                btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #21262d;
+                        color: #8b949e;
+                        border: 1px solid #30363d;
+                        border-radius: 5px;
+                        font-size: 10px;
+                        font-weight: 500;
+                    }
+                    QPushButton:hover {
+                        background-color: #7c3aed;
+                        color: #ffffff;
+                        border-color: #7c3aed;
+                    }
+                """)
+            ))
+
+        btn.clicked.connect(_copy)
+
+        # Position: top-right of the chat_display viewport, just below top edge
+        vp = self.chat_display.viewport()
+        x = vp.width() - btn.width() - 12
+        y = vp.height() - btn.height() - 12
+        btn.move(x, y)
+        btn.raise_()
+        btn.show()
+
+        # Store reference so old buttons can be repositioned on resize
+        if not hasattr(self, "_copy_buttons"):
+            self._copy_buttons = []
+        # Keep only last 20
+        self._copy_buttons.append(btn)
+        if len(self._copy_buttons) > 20:
+            old = self._copy_buttons.pop(0)
+            old.deleteLater()
+
+        # Auto-hide after 4 seconds
+        QTimer.singleShot(4000, lambda: btn.hide() if btn else None)
 
     def start_stream(self, prompt):
 
@@ -3271,6 +3366,30 @@ class AssistantUI(QWidget):
                     "what is the capital of France",
                 ],
             },
+            {
+                "icon": "🔍",
+                "name": "Web Search",
+                "category": "Web",
+                "desc": "Search the web via DuckDuckGo — no API key needed.",
+                "examples": [
+                    "search for python tutorials",
+                    "web search latest AI news",
+                    "look up best laptops 2025",
+                    "google what is quantum computing",
+                ],
+            },
+            {
+                "icon": "🌤",
+                "name": "Weather",
+                "category": "Web",
+                "desc": "Get current weather and 3-day forecast for any city worldwide.",
+                "examples": [
+                    "weather in London",
+                    "what's the weather in Tokyo",
+                    "weather for New York",
+                    "temperature in Mumbai",
+                ],
+            },
         ]
 
         CATEGORY_COLORS = {
@@ -3280,6 +3399,7 @@ class AssistantUI(QWidget):
             "Scheduler": ("#f59e0b", "#1f1508"),
             "Files":     ("#f97316", "#1f1108"),
             "Chat":      ("#ec4899", "#1f0a14"),
+            "Web":       ("#06b6d4", "#051a1f"),
         }
 
         container = QWidget()
@@ -3473,6 +3593,281 @@ class AssistantUI(QWidget):
                     " ".join(tool["examples"])
                 ).lower()
                 card.setVisible(q in haystack)
+
+    # ---------- MEMORY PAGE ----------
+
+    def build_memory_page(self):
+        """View and edit stored memory entries."""
+        from services.memory_service import load_memory, save_memory
+        import json as _json
+
+        container = QWidget()
+        container.setStyleSheet("background-color: #0d1117;")
+
+        outer = QVBoxLayout(container)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # ── Top bar ───────────────────────────────────────────────────────────
+        top_bar = QFrame()
+        top_bar.setFixedHeight(62)
+        top_bar.setStyleSheet("background-color: #0d1117; border-bottom: 1px solid #21262d;")
+        top_h = QHBoxLayout(top_bar)
+        top_h.setContentsMargins(32, 0, 32, 0)
+        top_h.setSpacing(10)
+
+        title_lbl = QLabel("🧠  Memory")
+        title_lbl.setStyleSheet("font-size: 16px; font-weight: 700; color: #e6edf3;")
+        top_h.addWidget(title_lbl)
+        top_h.addStretch()
+
+        self._mem_count_pill = QLabel("  0 entries  ")
+        self._mem_count_pill.setFixedHeight(26)
+        self._mem_count_pill.setStyleSheet("""
+            QLabel {
+                background-color: #161b22;
+                color: #8b949e;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                padding: 0 10px;
+                font-size: 11px;
+            }
+        """)
+        top_h.addWidget(self._mem_count_pill)
+
+        add_btn = QPushButton("＋ Add entry")
+        add_btn.setFixedHeight(32)
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #7c3aed;
+                color: #ffffff;
+                border: none;
+                border-radius: 7px;
+                padding: 0 14px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+            QPushButton:hover { background-color: #8b5cf6; }
+        """)
+        add_btn.clicked.connect(self._memory_add_entry)
+        top_h.addWidget(add_btn)
+
+        outer.addWidget(top_bar)
+
+        # ── Subtitle ──────────────────────────────────────────────────────────
+        sub_bar = QFrame()
+        sub_bar.setFixedHeight(38)
+        sub_bar.setStyleSheet("background-color: #0d1117; border: none;")
+        sub_h = QHBoxLayout(sub_bar)
+        sub_h.setContentsMargins(32, 0, 32, 0)
+        sub_lbl = QLabel("Facts Nova remembers about you — click any row to edit or delete it.")
+        sub_lbl.setStyleSheet("color: #484f58; font-size: 12px;")
+        sub_h.addWidget(sub_lbl)
+        outer.addWidget(sub_bar)
+
+        # ── Scrollable list of memory rows ────────────────────────────────────
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self._mem_scroll_content = QWidget()
+        self._mem_scroll_content.setStyleSheet("background-color: #0d1117;")
+        self._mem_rows_layout = QVBoxLayout(self._mem_scroll_content)
+        self._mem_rows_layout.setContentsMargins(32, 16, 32, 32)
+        self._mem_rows_layout.setSpacing(8)
+        self._mem_rows_layout.addStretch()
+
+        scroll.setWidget(self._mem_scroll_content)
+        outer.addWidget(scroll)
+
+        # ── Bottom action bar ─────────────────────────────────────────────────
+        action_bar = QFrame()
+        action_bar.setFixedHeight(52)
+        action_bar.setStyleSheet("background-color: #161b22; border-top: 1px solid #21262d;")
+        action_h = QHBoxLayout(action_bar)
+        action_h.setContentsMargins(32, 0, 32, 0)
+        action_h.setSpacing(10)
+
+        clear_btn = QPushButton("🗑  Clear All Memory")
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a1515;
+                color: #f85149;
+                border: 1px solid #6e2a2a;
+                border-radius: 7px;
+                padding: 6px 16px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #3a1a1a; border-color: #f85149; }
+        """)
+        clear_btn.clicked.connect(self._memory_clear_all)
+
+        refresh_btn = QPushButton("↻  Refresh")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #161b22;
+                color: #8b949e;
+                border: 1px solid #30363d;
+                border-radius: 7px;
+                padding: 6px 16px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background-color: #21262d; color: #e6edf3; }
+        """)
+        refresh_btn.clicked.connect(self._reload_memory_page)
+
+        action_h.addWidget(clear_btn)
+        action_h.addStretch()
+        action_h.addWidget(refresh_btn)
+        outer.addWidget(action_bar)
+
+        return container
+
+    def _reload_memory_page(self):
+        """Refresh the memory page rows from disk."""
+        from services.memory_service import load_memory
+
+        layout = self._mem_rows_layout
+
+        # Remove all rows except the trailing stretch
+        while layout.count() > 1:
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        memory = load_memory()
+
+        # Flatten nested profile dict
+        flat = {}
+        for k, v in memory.items():
+            if isinstance(v, dict):
+                for sk, sv in v.items():
+                    flat[sk] = sv
+            else:
+                flat[k] = v
+
+        self._mem_count_pill.setText(f"  {len(flat)} entr{'y' if len(flat)==1 else 'ies'}  ")
+
+        if not flat:
+            empty = QLabel("No memories stored yet.\nChat with Nova and it will remember things you tell it.")
+            empty.setAlignment(Qt.AlignCenter)
+            empty.setStyleSheet("color: #484f58; font-size: 13px;")
+            layout.insertWidget(0, empty)
+            return
+
+        for i, (key, value) in enumerate(flat.items()):
+            row = self._make_memory_row(key, str(value))
+            layout.insertWidget(i, row)
+
+    def _make_memory_row(self, key: str, value: str) -> QFrame:
+        """Build one editable memory row card."""
+        row = QFrame()
+        row.setObjectName("memRow")
+        row.setStyleSheet("""
+            QFrame#memRow {
+                background-color: #161b22;
+                border: 1px solid #21262d;
+                border-radius: 10px;
+            }
+            QFrame#memRow:hover { border-color: #7c3aed; }
+        """)
+        row.setFixedHeight(60)
+
+        h = QHBoxLayout(row)
+        h.setContentsMargins(16, 0, 12, 0)
+        h.setSpacing(12)
+
+        key_lbl = QLabel(key)
+        key_lbl.setFixedWidth(160)
+        key_lbl.setStyleSheet("color: #a78bfa; font-size: 12px; font-weight: 600; background: transparent;")
+
+        val_lbl = QLabel(value)
+        val_lbl.setStyleSheet("color: #c9d1d9; font-size: 13px; background: transparent;")
+        val_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+        edit_btn = QPushButton("✏")
+        edit_btn.setFixedSize(30, 30)
+        edit_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #30363d; border-radius: 6px;
+                color: #8b949e; font-size: 13px; }
+            QPushButton:hover { background: #21262d; color: #e6edf3; }
+        """)
+        edit_btn.setToolTip(f"Edit '{key}'")
+        edit_btn.clicked.connect(lambda _, k=key, v=value: self._memory_edit_entry(k, v))
+
+        del_btn = QPushButton("✕")
+        del_btn.setFixedSize(30, 30)
+        del_btn.setStyleSheet("""
+            QPushButton { background: transparent; border: 1px solid #30363d; border-radius: 6px;
+                color: #f85149; font-size: 13px; }
+            QPushButton:hover { background: #2a1515; border-color: #f85149; }
+        """)
+        del_btn.setToolTip(f"Delete '{key}'")
+        del_btn.clicked.connect(lambda _, k=key: self._memory_delete_entry(k))
+
+        h.addWidget(key_lbl)
+        h.addWidget(val_lbl)
+        h.addWidget(edit_btn)
+        h.addWidget(del_btn)
+
+        return row
+
+    def _memory_add_entry(self):
+        from services.memory_service import save_memory
+        key, ok = QInputDialog.getText(self, "Add Memory", "Key (e.g. 'hobby'):")
+        if not ok or not key.strip():
+            return
+        value, ok2 = QInputDialog.getText(self, "Add Memory", f"Value for '{key.strip()}':")
+        if not ok2:
+            return
+        save_memory(key.strip(), value.strip())
+        self._reload_memory_page()
+
+    def _memory_edit_entry(self, key: str, current_value: str):
+        from services.memory_service import save_memory
+        new_val, ok = QInputDialog.getText(
+            self, "Edit Memory", f"New value for '{key}':", text=current_value
+        )
+        if ok:
+            save_memory(key, new_val.strip())
+            self._reload_memory_page()
+
+    def _memory_delete_entry(self, key: str):
+        import json, os
+        from core.config import resource_path
+        MEMORY_FILE = resource_path("memory.json")
+        try:
+            with open(MEMORY_FILE, "r") as f:
+                data = json.load(f)
+            # Try flat key first, then nested profile
+            if key in data:
+                del data[key]
+            elif "profile" in data and key in data["profile"]:
+                del data["profile"][key]
+            with open(MEMORY_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+        except Exception:
+            pass
+        self._reload_memory_page()
+
+    def _memory_clear_all(self):
+        import json, os
+        from core.config import resource_path
+        reply = QMessageBox.question(
+            self, "Clear Memory",
+            "Delete ALL stored memories? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            MEMORY_FILE = resource_path("memory.json")
+            try:
+                with open(MEMORY_FILE, "w") as f:
+                    json.dump({}, f)
+            except Exception:
+                pass
+            self._reload_memory_page()
 
     def build_tasks_page(self):
 
