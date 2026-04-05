@@ -2,16 +2,8 @@
   "id": "session_ba0906ca5e60",
   "title": "hi",
   "created": "2026-04-05 16:47",
-  "updated": "2026-04-06 05:11",
+  "updated": "2026-04-06 05:18",
   "messages": [
-    {
-      "role": "assistant",
-      "content": "Hello! How can I assist you today?"
-    },
-    {
-      "role": "user",
-      "content": "open app notebook"
-    },
     {
       "role": "assistant",
       "content": "I don't have direct access to open applications on your device. You can typically find a \"Notebook\" application by searching for it in your app launcher or using the appropriate keyboard shortcut. Let me know if you need more help!"
@@ -83,6 +75,14 @@
     {
       "role": "assistant",
       "content": "I don't have real-time access to financial data. You can check the current gold rate by visiting an online financial news site like CNBC, Bloomberg, or by checking a trusted financial website such as GoldRate.com.\n\nWould you like me to provide instructions on how to find this information online?"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello! How can I assist you today?"
+    },
+    {
+      "role": "user",
+      "content": "search about ai bubble"
     }
   ]
 }

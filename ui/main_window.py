@@ -1,6 +1,7 @@
 import sys
 import os
 import time
+import re
 from threading import Thread
 from models.ollama_setup import ensure_ollama_ready
 from services.health_monitor import get_health_snapshot
@@ -3065,6 +3066,217 @@ class AssistantUI(QWidget):
             self.chat_display.verticalScrollBar().maximum()
         )
 
+    # ── Tool output rich formatter ────────────────────────────────────────────
+    def _format_tool_output(self, message: str) -> str:
+        """
+        Convert plain-text tool output into styled HTML for the chat bubble.
+        Handles: weather output, web search results, and plain text fallback.
+        """
+        import html as _html
+        import re
+
+        msg = message.strip()
+
+        # ── Weather card ──────────────────────────────────────────────────────
+        if msg.startswith("🌍 Weather for") or msg.startswith("\u26a0\ufe0f Could not"):
+            return self._format_weather_html(msg)
+
+        # ── Web search results ────────────────────────────────────────────────
+        if msg.startswith("🔍 Web Search:") or msg.startswith("🔍 Searched for:"):
+            return self._format_search_html(msg)
+
+        # ── Generic fallback: smart plain-text formatting ─────────────────────
+        return self._format_plain_html(msg)
+
+    def _format_weather_html(self, msg: str) -> str:
+        """Render weather output as a styled card."""
+        import html as _html
+        lines = msg.split("\n")
+        html_parts = []
+        html_parts.append(
+            '<div style="font-family:Segoe UI,sans-serif; font-size:13.5px; color:#e6edf3; line-height:1.7;">'
+        )
+        for line in lines:
+            s = line.strip()
+            if not s:
+                html_parts.append('<div style="height:6px;"></div>')
+                continue
+            safe = _html.escape(s)
+            # Title line
+            if s.startswith("🌍"):
+                html_parts.append(
+                    f'<div style="font-size:16px; font-weight:700; color:#e6edf3; '
+                    f'margin-bottom:4px;">{safe}</div>'
+                )
+            # Section headers (📅 3-Day Forecast:)
+            elif s.startswith("📅"):
+                html_parts.append(
+                    f'<div style="font-size:12px; font-weight:600; color:#8b949e; '
+                    f'text-transform:uppercase; letter-spacing:0.8px; margin-top:10px; '
+                    f'margin-bottom:4px; border-top:1px solid #30363d; padding-top:8px;">{safe}</div>'
+                )
+            # Forecast day rows (start with date like 2026-)
+            elif re.match(r'\d{4}-\d{2}-\d{2}', s):
+                parts = s.split(None, 1)
+                date_str = parts[0] if parts else s
+                rest = _html.escape(parts[1]) if len(parts) > 1 else ""
+                html_parts.append(
+                    f'<div style="display:flex; background:#161b22; border-radius:8px; '
+                    f'padding:5px 10px; margin:2px 0; font-size:13px;">'
+                    f'<span style="color:#8b949e; min-width:90px;">{_html.escape(date_str)}</span>'
+                    f'<span style="color:#c9d1d9;">{rest}</span></div>'
+                )
+            # Warning lines
+            elif s.startswith("⚠️"):
+                html_parts.append(
+                    f'<div style="color:#f85149; background:#2a1515; border-radius:8px; '
+                    f'padding:8px 12px; margin:4px 0; font-size:13px;">{safe}</div>'
+                )
+            # Stat lines (🌡 💧 💨 and condition)
+            else:
+                html_parts.append(f'<div style="font-size:13.5px; color:#c9d1d9;">{safe}</div>')
+
+        html_parts.append('</div>')
+        return "".join(html_parts)
+
+    def _format_search_html(self, msg: str) -> str:
+        """Render web search results with header and clickable links."""
+        import html as _html
+        import re
+        lines = msg.split("\n")
+        html_parts = []
+        html_parts.append(
+            '<div style="font-family:Segoe UI,sans-serif; font-size:13.5px; color:#e6edf3; line-height:1.7;">'
+        )
+        for i, line in enumerate(lines):
+            s = line.strip()
+            if not s:
+                if i > 0:
+                    html_parts.append('<div style="height:4px;"></div>')
+                continue
+            safe = _html.escape(s)
+            # Header line "🔍 Web Search: query"
+            if s.startswith("🔍"):
+                query_part = safe.split(":", 1)[-1].strip() if ":" in safe else safe
+                html_parts.append(
+                    f'<div style="font-size:13px; font-weight:600; color:#8b949e; '
+                    f'border-bottom:1px solid #30363d; padding-bottom:8px; margin-bottom:8px;">'
+                    f'🔍 &nbsp;<span style="color:#a78bfa;">{query_part}</span></div>'
+                )
+            # Abstract summary (📖)
+            elif s.startswith("📖"):
+                text = safe[3:].strip()
+                html_parts.append(
+                    f'<div style="background:#161b22; border-left:3px solid #7c3aed; '
+                    f'border-radius:0 8px 8px 0; padding:8px 12px; margin:4px 0; '
+                    f'font-size:13px; color:#c9d1d9;">{text}</div>'
+                )
+            # Answer line (✅)
+            elif s.startswith("✅"):
+                text = safe[2:].strip()
+                html_parts.append(
+                    f'<div style="background:#0d2a1a; border:1px solid #238636; '
+                    f'border-radius:8px; padding:8px 12px; margin:4px 0; '
+                    f'font-size:13px; color:#3fb950; font-weight:600;">{text}</div>'
+                )
+            # Source / link lines (🔗 or "Source:")
+            elif s.startswith("🔗") or s.startswith("Source:"):
+                raw_url = re.sub(r'^(🔗|Source:)\s*', '', s).strip()
+                safe_url = _html.escape(raw_url)
+                display = raw_url[:60] + "…" if len(raw_url) > 60 else raw_url
+                safe_display = _html.escape(display)
+                html_parts.append(
+                    f'<div style="margin:-2px 0 4px 0;">'
+                    f'<a href="{safe_url}" style="color:#58a6ff; font-size:11.5px; '
+                    f'text-decoration:none;">{safe_display}</a></div>'
+                )
+            # Bullet result items (•)
+            elif s.startswith("•"):
+                text = safe[1:].strip()
+                html_parts.append(
+                    f'<div style="padding:6px 0 2px 0; font-size:13px; color:#c9d1d9; '
+                    f'border-top:1px solid #21262d; margin-top:4px;">{text}</div>'
+                )
+            # Warning
+            elif s.startswith("⚠️") or s.startswith("No results"):
+                html_parts.append(
+                    f'<div style="color:#f85149; font-size:13px; margin:6px 0;">{safe}</div>'
+                )
+            else:
+                html_parts.append(f'<div style="font-size:13px; color:#8b949e;">{safe}</div>')
+
+        html_parts.append('</div>')
+        return "".join(html_parts)
+
+    def _format_plain_html(self, msg: str) -> str:
+        """Smart plain-text → HTML: handles headers, bullets, code blocks, links."""
+        import html as _html
+        import re
+        lines = msg.split("\n")
+        html_parts = []
+        html_parts.append(
+            '<div style="font-family:Segoe UI,sans-serif; font-size:13.5px; '
+            f'color:#e6edf3; line-height:1.7;">'
+        )
+        in_code = False
+        for line in lines:
+            s = line.rstrip()
+            if s.strip() == "" and not in_code:
+                html_parts.append('<div style="height:5px;"></div>')
+                continue
+            safe = _html.escape(s)
+            # Code fence
+            if s.startswith("```"):
+                if not in_code:
+                    in_code = True
+                    html_parts.append(
+                        '<div style="background:#161b22; border:1px solid #30363d; '
+                        'border-radius:8px; padding:10px 14px; margin:6px 0; '
+                        'font-family:Consolas,monospace; font-size:12px; color:#e6edf3;">'
+                    )
+                else:
+                    in_code = False
+                    html_parts.append('</div>')
+                continue
+            if in_code:
+                html_parts.append(f'<div style="white-space:pre;">{safe}</div>')
+                continue
+            # Emoji-prefixed "headers" (lines that start with emoji and are short)
+            if re.match(r'^[\U00010000-\U0010ffff\u2600-\u27BF]\S* .{1,60}$', s) and len(s) < 65 and s.endswith(":"):
+                html_parts.append(
+                    f'<div style="font-size:13px; font-weight:600; color:#8b949e; '
+                    f'margin-top:10px; letter-spacing:0.5px;">{safe}</div>'
+                )
+            # Warning / error lines
+            elif "⚠" in s or "error" in s.lower() and s.startswith("⚠"):
+                html_parts.append(
+                    f'<div style="color:#f85149; font-size:13px; margin:2px 0;">{safe}</div>'
+                )
+            # Success lines
+            elif s.startswith("✅") or s.startswith("✓"):
+                html_parts.append(
+                    f'<div style="color:#3fb950; font-size:13px; margin:2px 0;">{safe}</div>'
+                )
+            # Bullet points
+            elif s.startswith("•") or s.startswith("- ") or s.startswith("* "):
+                text = safe[1:].strip() if safe.startswith("•") else safe[2:].strip()
+                html_parts.append(
+                    f'<div style="padding:1px 0 1px 14px; color:#c9d1d9; font-size:13px; '
+                    f'text-indent:-10px;">• {text}</div>'
+                )
+            # Numbered list
+            elif re.match(r'^\d+[.)]', s):
+                html_parts.append(
+                    f'<div style="padding:1px 0 1px 14px; color:#c9d1d9; font-size:13px;">{safe}</div>'
+                )
+            else:
+                html_parts.append(f'<div style="font-size:13.5px; color:#c9d1d9; margin:1px 0;">{safe}</div>')
+
+        if in_code:
+            html_parts.append('</div>')
+        html_parts.append('</div>')
+        return "".join(html_parts)
+
     def append_assistant(self, message):
         from PySide6.QtGui import QTextCursor, QTextBlockFormat
         import html as _html
@@ -3073,7 +3285,7 @@ class AssistantUI(QWidget):
         if message == "":
             return
 
-        safe = _html.escape(message).replace("\n", "<br>")
+        rich_html = self._format_tool_output(message)
 
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
@@ -3089,7 +3301,7 @@ class AssistantUI(QWidget):
             f'<table align="left" cellpadding="12" cellspacing="0" width="auto" style="'
             f'background-color:#1e2533; border-radius:4px 14px 14px 14px;">'
             f'<tr><td style="color:#e6edf3; font-size:14px; font-family:Segoe UI; '
-            f'line-height:1.65; white-space:pre-wrap; word-wrap:break-word; max-width:600px;">{safe}</td></tr></table>'
+            f'line-height:1.65; white-space:normal; word-wrap:break-word; max-width:620px;">{rich_html}</td></tr></table>'
         )
 
         # ── Copy button — floating overlay ────────────────────────────────────
@@ -4006,52 +4218,180 @@ class AssistantUI(QWidget):
         container = QWidget()
         container.setStyleSheet("background-color: #0d1117;")
 
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(32, 28, 32, 28)
-        layout.setSpacing(20)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
 
+        inner = QWidget()
+        inner.setStyleSheet("background-color: #0d1117;")
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(32, 28, 32, 32)
+        layout.setSpacing(0)
+
+        # ── Helper: section header ─────────────────────────────────────────────
+        def _section(title_text, subtitle_text=""):
+            layout.addSpacing(10)
+            t = QLabel(title_text)
+            t.setStyleSheet("font-size: 13px; font-weight: 600; color: #e6edf3;")
+            layout.addWidget(t)
+            if subtitle_text:
+                s = QLabel(subtitle_text)
+                s.setStyleSheet("color: #484f58; font-size: 11px; margin-top: 1px;")
+                layout.addWidget(s)
+            layout.addSpacing(8)
+
+        def _divider():
+            div = QFrame(); div.setFixedHeight(1)
+            div.setStyleSheet("background-color: #21262d; margin: 14px 0;")
+            layout.addWidget(div)
+
+        def _row_checkbox(label_text, checked=False):
+            cb = QCheckBox(label_text)
+            cb.setChecked(checked)
+            cb.setStyleSheet("""
+                QCheckBox { color: #c9d1d9; font-size: 13px; spacing: 8px; }
+                QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px;
+                    border: 1px solid #30363d; background: #161b22; }
+                QCheckBox::indicator:checked { background: #7c3aed; border-color: #7c3aed; }
+                QCheckBox::indicator:hover { border-color: #7c3aed; }
+            """)
+            layout.addWidget(cb)
+            return cb
+
+        # ── Title ──────────────────────────────────────────────────────────────
         title = QLabel("Settings")
         title.setStyleSheet("font-size: 22px; font-weight: 700; color: #e6edf3; letter-spacing: -0.4px;")
         layout.addWidget(title)
+        subtitle = QLabel("Manage your assistant preferences")
+        subtitle.setStyleSheet("color: #484f58; font-size: 12px; margin-top: 2px;")
+        layout.addWidget(subtitle)
+        _divider()
 
-        div = QFrame(); div.setFixedHeight(1)
-        div.setStyleSheet("background-color: #21262d;")
-        layout.addWidget(div)
-
-        model_label = QLabel("AI Model")
-        model_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #e6edf3;")
-        layout.addWidget(model_label)
-
-        model_hint = QLabel("Choose the Ollama model to use for chat responses")
-        model_hint.setStyleSheet("color: #484f58; font-size: 11px; margin-top: -12px;")
-        layout.addWidget(model_hint)
-
+        # ── AI Model ──────────────────────────────────────────────────────────
+        _section("🤖  AI Model", "Choose the Ollama model to use for chat responses")
         config = load_config()
         self.model_dropdown = QComboBox()
         self.model_dropdown.addItems([
-            "qwen2.5:3b", "llama3:8b", "mistral:7b", "phi3:mini"
+            "qwen2.5:3b", "qwen2.5:7b", "llama3:8b", "mistral:7b", "phi3:mini", "gemma:2b"
         ])
-        self.model_dropdown.setCurrentText(config.get("model"))
+        self.model_dropdown.setCurrentText(config.get("model", "qwen2.5:3b"))
+        self.model_dropdown.setStyleSheet("""
+            QComboBox {
+                background-color: #161b22; color: #e6edf3; border: 1px solid #30363d;
+                border-radius: 8px; padding: 8px 12px; font-size: 13px;
+            }
+            QComboBox:focus { border-color: #7c3aed; }
+            QComboBox::drop-down { border: none; width: 24px; }
+            QComboBox QAbstractItemView {
+                background-color: #161b22; color: #e6edf3;
+                selection-background-color: #7c3aed; border: 1px solid #30363d;
+            }
+        """)
         layout.addWidget(self.model_dropdown)
+        _divider()
 
-        div2 = QFrame(); div2.setFixedHeight(1)
-        div2.setStyleSheet("background-color: #21262d;")
-        layout.addWidget(div2)
+        # ── Chat Behaviour ─────────────────────────────────────────────────────
+        _section("💬  Chat Behaviour")
+        self.setting_tts_default = _row_checkbox(
+            "Enable voice (TTS) by default on startup",
+            checked=config.get("tts_default", True)
+        )
+        self.setting_stream = _row_checkbox(
+            "Stream AI responses token by token",
+            checked=config.get("stream_responses", True)
+        )
+        self.setting_show_typing = _row_checkbox(
+            "Show 'Nova is typing…' indicator while streaming",
+            checked=config.get("show_typing_indicator", True)
+        )
+        self.setting_autocomplete = _row_checkbox(
+            "Show command autocomplete suggestions while typing",
+            checked=config.get("autocomplete_enabled", True)
+        )
+        _divider()
 
-        startup_label = QLabel("Startup")
-        startup_label.setStyleSheet("font-size: 13px; font-weight: 600; color: #e6edf3;")
-        layout.addWidget(startup_label)
+        # ── Memory ────────────────────────────────────────────────────────────
+        _section("🧠  Memory", "Control what the assistant remembers about you")
+        self.setting_memory = _row_checkbox(
+            "Enable memory — remember facts across conversations",
+            checked=config.get("memory_enabled", True)
+        )
+        self.setting_memory_prompt = _row_checkbox(
+            "Inject memory into AI system prompt",
+            checked=config.get("memory_in_prompt", True)
+        )
+        _divider()
 
-        self.auto_start_checkbox = QCheckBox("Launch Assistant when Windows starts")
-        self.auto_start_checkbox.setChecked(is_auto_start_enabled())
-        layout.addWidget(self.auto_start_checkbox)
+        # ── Notifications ─────────────────────────────────────────────────────
+        _section("🔔  Notifications")
+        self.setting_tray_notif = _row_checkbox(
+            "Show system tray notifications for scheduled tasks",
+            checked=config.get("tray_notifications", True)
+        )
+        self.setting_task_sound = _row_checkbox(
+            "Play sound when a scheduled task fires",
+            checked=config.get("task_sound", False)
+        )
+        _divider()
 
-        layout.addStretch()
+        # ── Appearance ────────────────────────────────────────────────────────
+        _section("🎨  Appearance")
+        self.setting_compact = _row_checkbox(
+            "Compact chat bubbles (reduced padding)",
+            checked=config.get("compact_bubbles", False)
+        )
+        self.setting_timestamps = _row_checkbox(
+            "Show timestamps on chat messages",
+            checked=config.get("show_timestamps", False)
+        )
+        _divider()
 
-        save_button = QPushButton("Save settings")
-        save_button.setFixedWidth(150)
+        # ── Startup ───────────────────────────────────────────────────────────
+        _section("🚀  Startup")
+        self.auto_start_checkbox = _row_checkbox(
+            "Launch Assistant automatically when Windows starts",
+            checked=is_auto_start_enabled()
+        )
+        self.setting_start_minimized = _row_checkbox(
+            "Start minimized to system tray",
+            checked=config.get("start_minimized", False)
+        )
+        _divider()
+
+        # ── Privacy ───────────────────────────────────────────────────────────
+        _section("🔒  Privacy")
+        self.setting_log_conversations = _row_checkbox(
+            "Save conversations to session history",
+            checked=config.get("log_conversations", True)
+        )
+        self.setting_anon_errors = _row_checkbox(
+            "Log errors to local log file",
+            checked=config.get("log_errors", True)
+        )
+
+        layout.addSpacing(20)
+
+        # ── Save button ────────────────────────────────────────────────────────
+        save_button = QPushButton("  💾   Save Settings")
+        save_button.setFixedHeight(42)
+        save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #7c3aed; color: #ffffff; border: none;
+                border-radius: 10px; font-size: 13px; font-weight: 600;
+            }
+            QPushButton:hover { background-color: #8b5cf6; }
+            QPushButton:pressed { background-color: #6d28d9; }
+        """)
         save_button.clicked.connect(self.save_settings)
         layout.addWidget(save_button)
+
+        scroll.setWidget(inner)
+
+        outer_layout = QVBoxLayout(container)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.addWidget(scroll)
 
         return container
 
@@ -4060,42 +4400,65 @@ class AssistantUI(QWidget):
         config = load_config()
 
         selected_model = self.model_dropdown.currentText()
-
         config["model"] = selected_model
+
+        # Chat behaviour
+        config["tts_default"]            = self.setting_tts_default.isChecked()
+        config["stream_responses"]       = self.setting_stream.isChecked()
+        config["show_typing_indicator"]  = self.setting_show_typing.isChecked()
+        config["autocomplete_enabled"]   = self.setting_autocomplete.isChecked()
+
+        # Memory
+        config["memory_enabled"]         = self.setting_memory.isChecked()
+        config["memory_in_prompt"]       = self.setting_memory_prompt.isChecked()
+
+        # Notifications
+        config["tray_notifications"]     = self.setting_tray_notif.isChecked()
+        config["task_sound"]             = self.setting_task_sound.isChecked()
+
+        # Appearance
+        config["compact_bubbles"]        = self.setting_compact.isChecked()
+        config["show_timestamps"]        = self.setting_timestamps.isChecked()
+
+        # Startup
+        config["start_minimized"]        = self.setting_start_minimized.isChecked()
+
+        # Privacy
+        config["log_conversations"]      = self.setting_log_conversations.isChecked()
+        config["log_errors"]             = self.setting_anon_errors.isChecked()
 
         save_config(config)
 
         if not is_model_installed(selected_model):
-
             reply = QMessageBox.question(
                 self,
                 "Download Model",
                 f"{selected_model} is not installed. Download it now?",
                 QMessageBox.Yes | QMessageBox.No
             )
-
             if reply == QMessageBox.Yes:
-
                 dialog = ModelDownloadDialog(
                     preselect_model=selected_model,
                     lock_model=True
                 )
-
                 dialog.exec()
 
         if self.auto_start_checkbox.isChecked():
-
             enable_auto_start()
-
             self.status_bar.setText("Startup enabled")
-
         else:
-
             disable_auto_start()
-
             self.status_bar.setText("Startup disabled")
 
-        QMessageBox.information(self, "Settings", "Settings saved")
+        # Apply TTS default immediately
+        self._tts_enabled = self.setting_tts_default.isChecked()
+        if self._tts_enabled:
+            self.tts_toggle_btn.setText("🔊  Voice On")
+        else:
+            self.tts_toggle_btn.setText("🔇  Voice Off")
+
+        self.status_bar.setText("Settings saved ✓")
+        QMessageBox.information(self, "Settings", "Settings saved successfully.")
 
 
 # ---------- ENSURE MODEL INSTALLED ----------
