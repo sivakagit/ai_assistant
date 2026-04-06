@@ -1,4 +1,3 @@
-import ollama
 from typing import Callable
 
 from tools.tools_manager import registry
@@ -75,6 +74,9 @@ def ask_llm(user_input: str) -> str:
         }
 
     ]
+
+    # Lazy import ollama here to avoid COM threading issues at startup on Windows
+    import ollama
 
     response = ollama.chat(
 
