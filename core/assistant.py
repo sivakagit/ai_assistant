@@ -1,4 +1,5 @@
 import ollama
+from typing import Callable
 
 from tools.tools_manager import registry
 from core.intent_engine import detect_intent
@@ -19,7 +20,7 @@ MODEL = get_setting("model")
 
 # ---------- MEMORY PROMPT ----------
 
-def build_memory_prompt(user_input):
+def build_memory_prompt(user_input: str) -> str:
 
     memory_data = load_memory()
 
@@ -58,7 +59,7 @@ Respond naturally.
 
 # ---------- LLM ----------
 
-def ask_llm(user_input):
+def ask_llm(user_input: str) -> str:
 
     prompt = build_memory_prompt(
         user_input
@@ -99,7 +100,7 @@ def ask_llm(user_input):
 
 # ---------- COMMAND ROUTER ----------
 
-def handle_command(text):
+def handle_command(text: str) -> str:
 
     text_lower = text.lower().strip()
 
@@ -125,7 +126,7 @@ def handle_command(text):
 
 # ---------- MAIN ----------
 
-def main():
+def main() -> None:
 
     print(
         "Assistant started. Type 'exit' to quit."

@@ -1,3 +1,5 @@
+from typing import Callable
+
 from tools.system_tools import (
     close_app,
     close_external_app,
@@ -9,19 +11,19 @@ from tools.system_tools import (
 
 class ToolRegistry:
 
-    def __init__(self):
+    def __init__(self) -> None:
 
-        self.tools = {}
+        self.tools: dict[str, Callable] = {}
 
-    def register(self, name, func):
+    def register(self, name: str, func: Callable) -> None:
 
         self.tools[name] = func
 
-    def get(self, name):
+    def get(self, name: str) -> Callable | None:
 
         return self.tools.get(name)
 
-    def list_tools(self):
+    def list_tools(self) -> list:
 
         return list(self.tools.keys())
 

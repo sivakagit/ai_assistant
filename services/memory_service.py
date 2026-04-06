@@ -6,7 +6,7 @@ from core.config import resource_path
 MEMORY_FILE = resource_path("data/config/memory.json")
 
 
-def load_memory():
+def load_memory() -> dict:
 
     if not os.path.exists(MEMORY_FILE):
 
@@ -23,7 +23,7 @@ def load_memory():
         return {}
 
 
-def save_memory(key, value):
+def save_memory(key: str, value: str) -> None:
 
     memory = load_memory()
 
@@ -42,7 +42,7 @@ def save_memory(key, value):
         )
 
 
-def get_memory(key):
+def get_memory(key: str) -> str | None:
 
     memory = load_memory()
 
@@ -56,15 +56,15 @@ def get_memory(key):
     return memory.get(key)
 
 
-def maybe_store_memory(text):
+def maybe_store_memory(text: str) -> None:
 
     text_lower = text.lower().strip()
 
-    def _after(phrase):
+    def _after(phrase: str) -> str:
         """Extract text after a phrase, strip punctuation."""
         return text.split(phrase, 1)[-1].strip().rstrip(".!,")
 
-    def _after_lower(phrase):
+    def _after_lower(phrase: str) -> str:
         return text_lower.split(phrase, 1)[-1].strip().rstrip(".!,")
 
     # Name

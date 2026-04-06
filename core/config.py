@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from threading import Lock
+from typing import Any
 
 _config_lock = Lock()
 
@@ -10,7 +11,7 @@ CONFIG_FILE_NAME = "data/config/config.json"
 
 # ---------- RESOURCE PATH ----------
 
-def resource_path(filename):
+def resource_path(filename: str) -> str:
 
     if getattr(sys, "frozen", False):
 
@@ -35,14 +36,14 @@ DEFAULT_CONFIG = {
 }
 
 
-def get_config_file():
+def get_config_file() -> str:
 
     return resource_path(CONFIG_FILE_NAME)
 
 
 # ---------- ENSURE CONFIG EXISTS ----------
 
-def _ensure_config_exists():
+def _ensure_config_exists() -> None:
 
     config_file = get_config_file()
 
@@ -59,7 +60,7 @@ def _ensure_config_exists():
 
 # ---------- LOAD CONFIG ----------
 
-def load_config():
+def load_config() -> dict:
 
     _ensure_config_exists()
 
@@ -95,7 +96,7 @@ def load_config():
 
 # ---------- SAVE CONFIG ----------
 
-def save_config(config):
+def save_config(config: dict) -> None:
 
     config_file = get_config_file()
 
@@ -112,7 +113,7 @@ def save_config(config):
 
 # ---------- GET SETTING ----------
 
-def get_setting(key):
+def get_setting(key: str) -> Any:
 
     config = load_config()
 
@@ -121,7 +122,7 @@ def get_setting(key):
 
 # ---------- SET SETTING ----------
 
-def set_setting(key, value):
+def set_setting(key: str, value: Any) -> bool:
 
     config = load_config()
 
@@ -134,7 +135,7 @@ def set_setting(key, value):
 
 # ---------- RESET CONFIG ----------
 
-def reset_config():
+def reset_config() -> bool:
 
     config_file = get_config_file()
 
@@ -153,7 +154,7 @@ def reset_config():
 
 # ---------- LIST SETTINGS ----------
 
-def list_settings():
+def list_settings() -> str:
 
     config = load_config()
 
@@ -170,7 +171,7 @@ def list_settings():
 
 # ---------- DELETE SETTING ----------
 
-def delete_setting(key):
+def delete_setting(key: str) -> bool:
 
     config = load_config()
 
@@ -187,7 +188,7 @@ def delete_setting(key):
 
 # ---------- CHECK BOOLEAN ----------
 
-def is_enabled(key):
+def is_enabled(key: str) -> bool:
 
     value = get_setting(key)
 
@@ -196,7 +197,7 @@ def is_enabled(key):
 
 # ---------- TOGGLE BOOLEAN ----------
 
-def toggle_setting(key):
+def toggle_setting(key: str) -> bool:
 
     config = load_config()
 

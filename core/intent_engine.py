@@ -1,4 +1,4 @@
-def detect_intent(text):
+def detect_intent(text: str) -> tuple[str, float]:
     """
     Detect intent from user text.
     Returns: (intent: str, confidence: float)
