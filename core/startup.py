@@ -46,22 +46,8 @@ def main():
     except Exception as e:
         logger.warning(f"[Startup] Plugin load failed: {e}")
 
-    # Check if embedding model is available (for semantic memory search)
-    try:
-        from services.embedding_service import is_embedding_model_available
-        from core.config import get_setting
-
-        embedding_model = get_setting("memory_embedding_model")
-        if get_setting("memory_semantic_search"):
-            if is_embedding_model_available(embedding_model):
-                logger.info(f"[Startup] Embedding model '{embedding_model}' available")
-            else:
-                logger.warning(
-                    f"[Startup] Embedding model '{embedding_model}' not found. "
-                    f"To enable semantic memory search, run: ollama pull {embedding_model}"
-                )
-    except Exception as e:
-        logger.debug(f"[Startup] Could not check embedding model: {e}")
+    # Note: Embedding model check removed from startup to avoid blocking UI loading.
+    # The embedding service will gracefully handle missing models at runtime.
 
     # Start UI
     window = AssistantUI()

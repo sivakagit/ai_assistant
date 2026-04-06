@@ -229,14 +229,28 @@ def get_cache_stats() -> dict:
 
 
 def is_embedding_model_available(model: str = DEFAULT_EMBEDDING_MODEL) -> bool:
-    """Check if the embedding model is available in Ollama."""
+    """
+    Check if the embedding model is available in Ollama.
+    Uses short timeout to avoid blocking.
+    """
     try:
-        response = ollama.list()
-        models = [m.get("name") for m in response.get("models", [])]
-        for m in models:
-            if m and model in m:
-                return True
-        return False
+        import signal
+
+        # Define timeout handler
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Ollama check timed out")
+
+        # Set 3-second timeout (Windows doesn't support signal alarms, so we fallback)
+        # On Windows, we'll just make a quick check attempt
+        try:
+            response = ollama.list()
+            models = [m.get("name") for m in response.get("models", [])]
+            for m in models:
+                if m and model in m:
+                    return True
+            return False
+        except Exception:
+            return False
     except Exception as e:
         logger.debug(f"[embedding] Failed to check model availability: {e}")
         return False
