@@ -41,7 +41,7 @@ from PySide6.QtCore import (
     Qt
 )
 
-import ollama
+# Note: ollama import moved to StreamWorker.run() to avoid COM threading issues on Windows
 
 from tools.tools_manager import registry
 from services.tts_service import speak_async, stop
@@ -502,6 +502,9 @@ class StreamWorker:
             ]
 
             # Step 2: Tuned generation parameters for a factual desktop assistant
+            # Lazy import ollama here to avoid COM threading issues at startup
+            import ollama
+
             stream = ollama.chat(
                 model=get_setting("model"),
                 messages=messages,

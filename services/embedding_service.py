@@ -13,8 +13,6 @@ import os
 from threading import Lock
 from typing import Optional
 
-import ollama
-
 from core.logger import get_logger
 from core.config import resource_path
 
@@ -52,11 +50,13 @@ def embed_text(text: str, model: str = DEFAULT_EMBEDDING_MODEL) -> Optional[list
     """
     Generate embedding for text using Ollama.
     Returns list of floats, or None if embedding fails.
+    Lazily imports ollama to avoid COM threading issues at startup.
     """
     if not text or not isinstance(text, str):
         return None
 
     try:
+        import ollama
         response = ollama.embeddings(model=model, prompt=text.strip())
         return response.get("embedding")
     except Exception as e:
@@ -232,16 +232,10 @@ def is_embedding_model_available(model: str = DEFAULT_EMBEDDING_MODEL) -> bool:
     """
     Check if the embedding model is available in Ollama.
     Uses short timeout to avoid blocking.
+    Lazily imports ollama to avoid COM threading issues.
     """
     try:
-        import signal
-
-        # Define timeout handler
-        def timeout_handler(signum, frame):
-            raise TimeoutError("Ollama check timed out")
-
-        # Set 3-second timeout (Windows doesn't support signal alarms, so we fallback)
-        # On Windows, we'll just make a quick check attempt
+        import ollama
         try:
             response = ollama.list()
             models = [m.get("name") for m in response.get("models", [])]
