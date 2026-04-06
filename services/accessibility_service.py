@@ -27,6 +27,7 @@ pygetwindow – lightweight window title detection
 import threading
 import time
 import ctypes
+import sys
 from typing import Callable, Optional
 
 # ── optional deps with graceful fallback ─────────────────────────────────────
@@ -43,12 +44,33 @@ try:
 except ImportError:
     _GW_OK = False
 
-try:
-    from pywinauto import Desktop
-    from pywinauto.controls.uia_controls import EditWrapper
-    _WINAUTO_OK = True
-except ImportError:
-    _WINAUTO_OK = False
+# pywinauto uses Windows UI Automation which requires COM initialization
+# Defer this import to when it's actually used, not at module load time
+_WINAUTO_OK = None  # None = unchecked, True/False after first attempt
+
+
+def _check_winauto():
+    """Lazy check for pywinauto availability. Initializes COM if on Windows."""
+    global _WINAUTO_OK
+    if _WINAUTO_OK is not None:
+        return _WINAUTO_OK
+    try:
+        # Initialize COM for this thread if on Windows BEFORE importing pywinauto
+        if sys.platform == "win32":
+            try:
+                ole32 = ctypes.windll.ole32
+                ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
+            except Exception:
+                pass
+
+        from pywinauto import Desktop
+        from pywinauto.controls.uia_controls import EditWrapper
+        _WINAUTO_OK = True
+    except ImportError:
+        _WINAUTO_OK = False
+    except Exception:
+        _WINAUTO_OK = False
+    return _WINAUTO_OK
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -69,10 +91,11 @@ class FocusReader:
         Return a natural-language description of the currently focused UI element.
         e.g. "Button: OK", "Edit field: Search, current text: hello"
         """
-        if not _WINAUTO_OK:
+        if not _check_winauto():
             return self._fallback_focus_description()
 
         try:
+            from pywinauto import Desktop
             desktop = Desktop(backend="uia")
             focused = desktop.get_focus()
             if focused is None:

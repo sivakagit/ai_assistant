@@ -550,9 +550,21 @@ def _check_comtypes() -> bool:
     if _COMTYPES_OK is not None:
         return _COMTYPES_OK
     try:
+        import sys
+        # Initialize COM for this thread if on Windows BEFORE importing comtypes
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                ole32 = ctypes.windll.ole32
+                ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
+            except Exception:
+                pass
+
         import comtypes.client  # noqa: F401
         _COMTYPES_OK = True
     except ImportError:
+        _COMTYPES_OK = False
+    except Exception:
         _COMTYPES_OK = False
     return _COMTYPES_OK
 
