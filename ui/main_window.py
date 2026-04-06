@@ -1,18 +1,9 @@
 import sys
 import os
-
-# Initialize Qt's COM handling FIRST (before any potentially COM-using imports)
-if sys.platform == "win32":
-    try:
-        from PySide6 import QtCore  # noqa: F401
-    except Exception:
-        pass
-
-from dotenv import load_dotenv
-
 import time
 import re
 from threading import Thread
+from dotenv import load_dotenv
 from models.ollama_setup import ensure_ollama_ready
 from services.health_monitor import get_health_snapshot
 from PySide6.QtWidgets import (
