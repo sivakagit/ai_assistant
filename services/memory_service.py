@@ -58,46 +58,52 @@ def get_memory(key):
 
 def maybe_store_memory(text):
 
-    text_lower = text.lower()
+    text_lower = text.lower().strip()
 
+    def _after(phrase):
+        """Extract text after a phrase, strip punctuation."""
+        return text.split(phrase, 1)[-1].strip().rstrip(".!,")
+
+    def _after_lower(phrase):
+        return text_lower.split(phrase, 1)[-1].strip().rstrip(".!,")
+
+    # Name
     if "my name is" in text_lower:
+        save_memory("name", _after("my name is") or _after("My name is"))
 
-        name = text.split("is")[-1].strip().rstrip(".")
+    # Role / job
+    for phrase in ("i am a ", "i am an ", "i'm a ", "i'm an ", "i work as "):
+        if phrase in text_lower:
+            save_memory("role", _after_lower(phrase))
+            break
 
-        save_memory("name", name)
-
-    if "i am a" in text_lower:
-
-        role = text_lower.split("i am a")[-1].strip().rstrip(".")
-
-        save_memory("role", role)
-
-    if "i am an" in text_lower:
-
-        role = text_lower.split("i am an")[-1].strip().rstrip(".")
-
-        save_memory("role", role)
-
+    # Study
     if "i study" in text_lower:
+        save_memory("field_of_study", _after_lower("i study"))
 
-        subject = text_lower.split("i study")[-1].strip().rstrip(".")
-
-        save_memory("field_of_study", subject)
-
-    if "i work as" in text_lower:
-
-        job = text_lower.split("i work as")[-1].strip().rstrip(".")
-
-        save_memory("role", job)
-
+    # Location
     if "i live in" in text_lower:
+        save_memory("location", _after("i live in") or _after("I live in"))
 
-        location = text.split("i live in")[-1].strip().rstrip(".")
+    # Age
+    if "i am " in text_lower and " years old" in text_lower:
+        age_part = _after_lower("i am ").split()[0]
+        if age_part.isdigit():
+            save_memory("age", age_part)
 
-        save_memory("location", location)
+    # Language / preference
+    if "i prefer" in text_lower:
+        save_memory("preference", _after_lower("i prefer"))
 
-    if "i'm a" in text_lower:
+    if "i like" in text_lower:
+        save_memory("likes", _after_lower("i like"))
 
-        role = text_lower.split("i'm a")[-1].strip().rstrip(".")
+    if "i use" in text_lower:
+        save_memory("tools", _after_lower("i use"))
 
-        save_memory("role", role)
+    # Explicit "remember that X is Y"
+    if text_lower.startswith("remember "):
+        data = _after_lower("remember ").lstrip("that ").strip()
+        if " is " in data:
+            key, value = data.split(" is ", 1)
+            save_memory(key.strip(), value.strip())

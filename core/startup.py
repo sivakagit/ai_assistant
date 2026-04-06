@@ -37,6 +37,15 @@ def main():
     # Start background services
     start_scheduler()
 
+    # Load plugins from plugins/ directory
+    try:
+        from core.plugin_manager import plugin_manager
+        loaded = plugin_manager.load_all()
+        if loaded:
+            logger.info(f"[Startup] {loaded} plugin(s) loaded")
+    except Exception as e:
+        logger.warning(f"[Startup] Plugin load failed: {e}")
+
     # Start UI
     window = AssistantUI()
     window.show()

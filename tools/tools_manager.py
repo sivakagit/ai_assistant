@@ -1,4 +1,5 @@
 from tools.system_tools import open_app as _sys_open_app
+from tools.system_tools import close_external_app as _sys_close_external_app
 from core.run_python import run_python_script
 from services.memory_service import (
     save_memory,
@@ -64,6 +65,12 @@ def open_app_tool(text):
         return "Please specify an application"
 
     return _sys_open_app(text)
+
+
+# ---------- CLOSE EXTERNAL APP TOOL ----------
+
+def close_external_app_tool(text):
+    return _sys_close_external_app(text)
 
 
 # ---------- REMEMBER TOOL ----------
@@ -472,7 +479,7 @@ def task_management_tool(text):
 
     text = text.lower()
 
-    if "show tasks" in text:
+    if "show tasks" in text or "list tasks" in text or "view tasks" in text:
 
         return list_tasks()
 
@@ -504,7 +511,8 @@ def task_management_tool(text):
 
         return "Please specify task number"
 
-    if "cancel all tasks" in text:
+    if any(p in text for p in ("cancel all tasks", "remove all tasks",
+                               "delete all tasks", "clear all tasks")):
 
         return cancel_all_tasks()
 
@@ -538,6 +546,7 @@ from tools.weather_tool import weather_tool
 # ---------- REGISTER TOOLS ----------
 
 registry.register("open_app",           open_app_tool)
+registry.register("close_external_app", close_external_app_tool)
 registry.register("remember",           remember_tool)
 registry.register("show_memory",        show_memory_tool)
 registry.register("clear_conversation", clear_conversation_tool)
@@ -562,8 +571,6 @@ from tools.screen_tools import (
     last_screen_text
 )
 
-def setup_tools():
-    registry.register(...)
 
 def read_screen_tool(text: str) -> str:
     text_lower = text.lower()

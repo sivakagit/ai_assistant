@@ -94,6 +94,8 @@ from models.downloader import (
     DownloadController
 )
 from core.logger import get_logger
+from ui.command_palette import CommandPaletteMixin
+from core.plugin_manager import plugin_manager
 
 logger = get_logger()
 # Ensure the project root (E:\Assistant) is on the path so that
@@ -125,6 +127,44 @@ class StreamSignals(QObject):
     finished = Signal()
 
 
+# ---------- SMART MEMORY RETRIEVAL (Step 5) ----------
+
+def retrieve_relevant_memory(user_input: str) -> dict:
+    """
+    Return only memory entries relevant to the user's message,
+    instead of dumping everything into every prompt.
+    """
+    memory_data = load_memory()
+    if not memory_data:
+        return {}
+
+    user_lower = user_input.lower()
+    relevant   = {}
+
+    # Flatten nested profile dict
+    flat = {}
+    for key, value in memory_data.items():
+        if isinstance(value, dict):
+            for subkey, subvalue in value.items():
+                flat[subkey] = subvalue
+        else:
+            flat[key] = value
+
+    # Always include name and role — they're almost always relevant
+    for always_key in ("name", "role", "location"):
+        if always_key in flat:
+            relevant[always_key] = flat[always_key]
+
+    # Include other keys only if they appear in the user's message
+    for key, value in flat.items():
+        if key in relevant:
+            continue
+        if key.lower() in user_lower or str(value).lower() in user_lower:
+            relevant[key] = value
+
+    return relevant
+
+
 # ---------- MEMORY PROMPT ----------
 
 def build_memory_prompt(user_input):
@@ -134,48 +174,60 @@ def build_memory_prompt(user_input):
     return user_input
 
 
-def build_system_prompt():
-    """Builds the system prompt, embedding memory as silent background context."""
+# ---------- SYSTEM PROMPT (Steps 1 + 4 + 5) ----------
 
-    base = (
-        "You are a personal AI assistant. "
-        "Be concise and focused on what the user actually asks. "
-        "If they say hi or chat casually, just respond naturally — "
-        "do not bring up anything about them unless they ask."
-    )
+def build_system_prompt(user_input: str = "") -> str:
+    """
+    Builds a structured system prompt with:
+    - Clear behavior rules  (Step 1)
+    - Available tools list  (Step 4)
+    - Relevant memory only  (Step 5)
+    """
 
-    memory_data = load_memory()
+    # ── Step 1: Structured base prompt ───────────────────────────────────────
+    base = """\
+You are Nova, a smart desktop AI assistant running on the user's PC.
 
-    if not memory_data:
+Behavior rules:
+1. Be concise and direct — avoid unnecessary filler words
+2. Use tools when they are available instead of guessing
+3. Ask for clarification only if truly needed
+4. Never hallucinate facts, files, or system state
+5. Prefer actionable, specific answers over vague ones
+6. Use memory context when it is relevant to the question
+7. Format output clearly — use bullet points for lists, short paragraphs for explanations
 
-        return base
+Response style:
+- Keep replies short unless detail is explicitly requested
+- Use plain language, not technical jargon unless the user is technical
+- Never repeat the user's question back to them
+- If a tool handled the request, confirm the result briefly\
+"""
 
-    memory_lines = []
+    sections = [base]
 
-    for key, value in memory_data.items():
+    # ── Step 4: Tool list awareness ──────────────────────────────────────────
+    try:
+        tool_names = registry.list_tools()
+        if tool_names:
+            tool_lines = "\n".join(f"  - {t}" for t in sorted(tool_names))
+            sections.append(
+                f"Available tools (already handled automatically — do not suggest these manually):\n"
+                f"{tool_lines}"
+            )
+    except Exception:
+        pass
 
-        if isinstance(value, dict):
+    # ── Step 5: Relevant memory only ─────────────────────────────────────────
+    relevant = retrieve_relevant_memory(user_input)
+    if relevant:
+        mem_lines = "\n".join(f"  {k}: {v}" for k, v in relevant.items())
+        sections.append(
+            f"Known facts about the user (use only when directly relevant — do not repeat unprompted):\n"
+            f"{mem_lines}"
+        )
 
-            for subkey, subvalue in value.items():
-
-                memory_lines.append(f"{subkey}: {subvalue}")
-
-        else:
-
-            memory_lines.append(f"{key}: {value}")
-
-    if not memory_lines:
-
-        return base
-
-    memory_text = "\n".join(memory_lines)
-
-    return (
-        f"{base}\n\n"
-        f"The following facts about the user are stored for context. "
-        f"Do NOT mention them unless the user's message makes them directly relevant:\n"
-        f"{memory_text}"
-    )
+    return "\n\n".join(sections)
 
 
 # ---------- COMMAND ROUTER ----------
@@ -219,26 +271,55 @@ class StreamWorker:
 
             history = get_history()
 
-            messages = [
+            # Step 3: RAG — retrieve relevant past conversation snippets
+            rag_context = ""
+            try:
+                from tools.conversation_search_tools import search_conversations
+                results = search_conversations(self.prompt)
+                if results:
+                    snippets = []
+                    for r in results[:3]:  # top 3 matches
+                        snippet = r.get("snippet", "").strip()
+                        if snippet and snippet not in self.prompt:
+                            snippets.append(f"- {snippet}")
+                    if snippets:
+                        rag_context = "Relevant past context:\n" + "\n".join(snippets)
+            except Exception:
+                pass
 
+            sys_messages = [
                 {
                     "role": "system",
-                    "content": build_system_prompt()
+                    "content": build_system_prompt(self.prompt)
                 }
+            ]
 
-            ] + history + [
+            # Inject RAG context as a separate system message if found
+            if rag_context:
+                sys_messages.append({
+                    "role": "system",
+                    "content": rag_context
+                })
 
+            messages = sys_messages + history + [
                 {
                     "role": "user",
                     "content": memory_prompt
                 }
-
             ]
 
+            # Step 2: Tuned generation parameters for a factual desktop assistant
             stream = ollama.chat(
                 model=get_setting("model"),
                 messages=messages,
-                stream=True
+                stream=True,
+                options={
+                    "temperature":    0.4,   # focused, factual responses
+                    "top_p":          0.9,   # nucleus sampling
+                    "num_predict":    512,   # max tokens per response
+                    "repeat_penalty": 1.1,   # reduce repetition
+                    "stop": ["User:", "Assistant:", "<|user|>", "<|assistant|>"]
+                }
             )
 
             full_text = ""
@@ -1492,7 +1573,7 @@ class SearchDialog(QDialog):
 
 # ---------- MAIN UI ----------
 
-class AssistantUI(QWidget):
+class AssistantUI(CommandPaletteMixin, QWidget):
 
     _screen_result_signal = Signal(str)
     _tool_result_signal   = Signal(str)   # for threaded tool responses
@@ -1519,6 +1600,17 @@ class AssistantUI(QWidget):
 
         self._screen_result_signal.connect(self._on_screen_result)
         self._tool_result_signal.connect(self._on_tool_result)
+
+        # ── Command palette (Ctrl+Space) ──────────────────────────────────────
+        self._init_command_palette()
+
+        # ── Load plugins from plugins/ directory ──────────────────────────────
+        try:
+            loaded = plugin_manager.load_all()
+            if loaded:
+                logger.info(f"[Startup] {loaded} plugin(s) loaded")
+        except Exception as e:
+            logger.warning(f"[Startup] Plugin load failed: {e}")
 
     def _on_screen_result(self, display: str):
 
@@ -2989,6 +3081,20 @@ class AssistantUI(QWidget):
                 self._tool_result_signal.emit(result)
 
             Thread(target=_do_weather, daemon=True).start()
+            return
+
+        # ── Plugin dispatch ───────────────────────────────────────────────────
+        # Runs BEFORE handle_command/LLM so plugins get first pick of intents.
+        if plugin_manager.can_handle(_intent):
+            self.append_assistant("⚡ Running plugin…")
+
+            def _do_plugin(i=_intent, t=message):
+                result = plugin_manager.dispatch(i, t)
+                self._tool_result_signal.emit(
+                    result or "⚠️ Plugin returned no response."
+                )
+
+            Thread(target=_do_plugin, daemon=True).start()
             return
 
         # --- Normal command / chat flow ---

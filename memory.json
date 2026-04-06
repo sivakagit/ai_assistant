@@ -1,4 +1,7 @@
 {
   "my name": "siva",
-  "i": "a college student"
+  "i": "a college student",
+  "profile": {
+    "my age": "21"
+  }
 }
