@@ -41,6 +41,17 @@ def save_memory(key: str, value: str) -> None:
             indent=2
         )
 
+    # Auto-cache embedding for semantic search
+    try:
+        from services.embedding_service import embed_and_cache_item
+        from core.config import get_setting
+
+        if get_setting("memory_embeddings_cached"):
+            embed_and_cache_item(key, value)
+    except Exception as e:
+        # Silently fail if embedding service unavailable
+        pass
+
 
 def get_memory(key: str) -> str | None:
 

@@ -209,13 +209,19 @@ def retrieve_relevant_memory(user_input: str) -> dict:
     """
     Return only memory entries relevant to the user's message,
     instead of dumping everything into every prompt.
+
+    Strategy:
+    1. Always include: name, role, location (hardcoded relevant fields)
+    2. Try keyword matching if enabled
+    3. If semantic search enabled, use vector similarity to find additional matches
+    4. Fall back gracefully if embeddings unavailable
     """
     memory_data = load_memory()
     if not memory_data:
         return {}
 
     user_lower = user_input.lower()
-    relevant   = {}
+    relevant = {}
 
     # Flatten nested profile dict
     flat = {}
@@ -231,12 +237,39 @@ def retrieve_relevant_memory(user_input: str) -> dict:
         if always_key in flat:
             relevant[always_key] = flat[always_key]
 
-    # Include other keys only if they appear in the user's message
-    for key, value in flat.items():
-        if key in relevant:
-            continue
-        if key.lower() in user_lower or str(value).lower() in user_lower:
-            relevant[key] = value
+    # Try keyword matching if enabled (fast first pass)
+    if get_setting("memory_keyword_first"):
+        for key, value in flat.items():
+            if key in relevant:
+                continue
+            if key.lower() in user_lower or str(value).lower() in user_lower:
+                relevant[key] = value
+
+    # Try semantic search if enabled
+    if get_setting("memory_semantic_search"):
+        try:
+            from services.embedding_service import search_memory
+
+            # Skip items already found by keyword matching
+            remaining_items = {k: v for k, v in flat.items() if k not in relevant}
+
+            if remaining_items:
+                semantic_results = search_memory(
+                    query=user_input,
+                    memory_items=remaining_items,
+                    top_k=get_setting("memory_top_k"),
+                    model=get_setting("memory_embedding_model")
+                )
+
+                # Add semantic search results
+                for result in semantic_results:
+                    key = result.get("key")
+                    value = result.get("value")
+                    if key and value and key not in relevant:
+                        relevant[key] = value
+        except Exception as e:
+            # Silently fail - keyword matching is already working
+            logger.debug(f"[memory] Semantic search failed: {e}")
 
     return relevant
 

@@ -32,7 +32,12 @@ DEFAULT_CONFIG = {
     "theme": "dark",
     "notifications": True,
     "max_history": 20,
-    "window_minimize_to_tray": True
+    "window_minimize_to_tray": True,
+    "memory_semantic_search": True,
+    "memory_embedding_model": "nomic-embed-text",
+    "memory_top_k": 5,
+    "memory_keyword_first": True,
+    "memory_embeddings_cached": True
 }
 
 
