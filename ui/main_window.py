@@ -655,6 +655,15 @@ class OllamaSetupDialog(QDialog):
     def _do_setup(self, model):
 
         try:
+            # Initialize COM for this background thread on Windows
+            # Each thread that uses COM must initialize it
+            if sys.platform == "win32":
+                try:
+                    import ctypes
+                    ole32 = ctypes.windll.ole32
+                    ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
+                except Exception:
+                    pass
 
             ready = ensure_ollama_ready(model)
 

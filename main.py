@@ -1,19 +1,11 @@
 import os
 import sys
-import ctypes
 
-# Initialize COM in multithreaded mode before Qt tries to use it
-# This prevents "Cannot change thread mode after it is set" error on Windows
+# Don't pre-initialize COM - let pywindow handle it properly per-thread
+# Instead, set Qt to use multithreaded COM initialization
 if sys.platform == "win32":
-    try:
-        # COINIT_MULTITHREADED = 0
-        # COINIT_APARTMENTTHREADED = 2
-        # Try to set multithreaded mode for compatibility with Qt
-        ole32 = ctypes.windll.ole32
-        ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
-    except Exception:
-        # If this fails, that's okay - COM will be initialized  later anyway
-        pass
+    # Tell Qt to initialize COM in multithreaded mode
+    os.environ["QT_QPA_PLATFORM"] = "windows"
 
 # Redirect stderr to suppress Qt's internal C++ OleInitialize warning.
 # This message is printed by Qt's DLL before Python can intercept it,
