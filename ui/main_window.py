@@ -3,6 +3,14 @@ from dotenv import load_dotenv
 
 import sys
 import os
+
+# Initialize Qt's COM handling early (before any potentially COM-using imports)
+if sys.platform == "win32":
+    try:
+        from PySide6 import QtCore  # noqa: F401
+    except Exception:
+        pass
+
 import time
 import re
 from threading import Thread

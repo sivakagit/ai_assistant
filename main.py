@@ -1,22 +1,16 @@
 import os
 import sys
 
-if sys.platform == "win32":
-    # Import PySide6 FIRST on Windows to initialize COM in multithreaded mode
-    # This must happen before any other COM-using libraries are imported
-    try:
-        import ctypes
-        # Manually initialize COM in multithreaded mode for this thread
-        ole32 = ctypes.windll.ole32
-        ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
-    except Exception:
-        pass
-
+# Set environment variables BEFORE any Qt imports
 os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.window=false"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
-# Import the main function from the UI module
-# By this point, COM has been initialized in the right mode
+# Import QtCore IMMEDIATELY to let Qt initialize COM properly
+# This must happen before any other imports that might use COM
+if sys.platform == "win32":
+    from PySide6 import QtCore  # noqa: F401 - triggers Qt's COM initialization
+
+# NOW import everything else
 from ui.main_window import main
 
 main()
