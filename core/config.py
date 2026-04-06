@@ -5,7 +5,7 @@ from threading import Lock
 
 _config_lock = Lock()
 
-CONFIG_FILE_NAME = "config.json"
+CONFIG_FILE_NAME = "data/config/config.json"
 
 
 # ---------- RESOURCE PATH ----------

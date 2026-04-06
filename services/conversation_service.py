@@ -2,7 +2,7 @@
 conversation.py  —  Multi-session conversation persistence.
 
 Session files are stored as:
-    sessions/session_<uuid>.json
+    data/sessions/session_<uuid>.json
 
 Each file has the shape:
 {
@@ -31,7 +31,7 @@ MAX_MESSAGES = 20
 # ── folder that holds all session files ──────────────────────────────────────
 
 def _sessions_dir() -> str:
-    path = resource_path("sessions")
+    path = resource_path("data/sessions")
     os.makedirs(path, exist_ok=True)
     return path
 

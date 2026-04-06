@@ -1,22 +1,8 @@
 {
-  "model": "qwen2.5:7b",
+  "model": "qwen2.5:3b",
   "auto_start": false,
   "theme": "dark",
   "notifications": true,
   "max_history": 20,
-  "window_minimize_to_tray": true,
-  "active_session": "session_ba0906ca5e60",
-  "tts_default": true,
-  "stream_responses": true,
-  "show_typing_indicator": true,
-  "autocomplete_enabled": true,
-  "memory_enabled": true,
-  "memory_in_prompt": true,
-  "tray_notifications": true,
-  "task_sound": false,
-  "compact_bubbles": false,
-  "show_timestamps": false,
-  "start_minimized": false,
-  "log_conversations": true,
-  "log_errors": true
+  "window_minimize_to_tray": true
 }

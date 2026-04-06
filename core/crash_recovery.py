@@ -7,7 +7,7 @@ from core.logger import get_logger
 
 logger = get_logger()
 
-STATE_FILE = resource_path("runtime_state.json")
+STATE_FILE = resource_path("data/config/runtime_state.json")
 
 
 def _default_state():

@@ -3,7 +3,7 @@ import os
 
 from core.config import resource_path
 
-MEMORY_FILE = resource_path("memory.json")
+MEMORY_FILE = resource_path("data/config/memory.json")
 
 
 def load_memory():
