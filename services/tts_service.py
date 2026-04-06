@@ -50,17 +50,8 @@ def _do_speak(text: str):
     with _lock:
         _speaking = True
         try:
-            # Initialize COM for this background thread on Windows
-            # pyttsx3 uses SAPI5 which requires COM
-            import sys
-            if sys.platform == "win32":
-                try:
-                    import ctypes
-                    ole32 = ctypes.windll.ole32
-                    ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
-                except Exception:
-                    pass
-
+            # pyttsx3 SAPI5 usually handles COM on its own
+            # Main thread COM initialization from Qt should be sufficient
             import pyttsx3
             engine = pyttsx3.init()
             engine.setProperty("rate",   _rate)

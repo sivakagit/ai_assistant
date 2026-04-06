@@ -50,19 +50,11 @@ _WINAUTO_OK = None  # None = unchecked, True/False after first attempt
 
 
 def _check_winauto():
-    """Lazy check for pywinauto availability. Initializes COM if on Windows."""
+    """Lazy check for pywinauto availability."""
     global _WINAUTO_OK
     if _WINAUTO_OK is not None:
         return _WINAUTO_OK
     try:
-        # Initialize COM for this thread if on Windows BEFORE importing pywinauto
-        if sys.platform == "win32":
-            try:
-                ole32 = ctypes.windll.ole32
-                ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
-            except Exception:
-                pass
-
         from pywinauto import Desktop
         from pywinauto.controls.uia_controls import EditWrapper
         _WINAUTO_OK = True

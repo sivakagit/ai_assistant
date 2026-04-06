@@ -550,16 +550,6 @@ def _check_comtypes() -> bool:
     if _COMTYPES_OK is not None:
         return _COMTYPES_OK
     try:
-        import sys
-        # Initialize COM for this thread if on Windows BEFORE importing comtypes
-        if sys.platform == "win32":
-            try:
-                import ctypes
-                ole32 = ctypes.windll.ole32
-                ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
-            except Exception:
-                pass
-
         import comtypes.client  # noqa: F401
         _COMTYPES_OK = True
     except ImportError:
@@ -579,16 +569,6 @@ def _read_accessibility_focused_window() -> str:
     Does NOT work for: raw images, scanned PDFs, camera photos.
     """
     try:
-        import sys
-        # Initialize COM for this thread if on Windows
-        # UI Automation (comtypes) requires COM to be initialized
-        if sys.platform == "win32":
-            try:
-                ole32 = ctypes.windll.ole32
-                ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
-            except Exception:
-                pass
-
         import comtypes.client
         UIAuto = comtypes.client.GetModule(
             "UIAutomationCore.dll"
@@ -653,16 +633,6 @@ def _read_accessibility_pywinauto(region=None) -> str:
     Reads the active window\'s control tree for text.
     """
     try:
-        import sys
-        # Initialize COM for this thread if on Windows
-        # pywinauto uses Windows UI Automation which requires COM
-        if sys.platform == "win32":
-            try:
-                ole32 = ctypes.windll.ole32
-                ole32.CoInitializeEx(0, 0)  # COINIT_MULTITHREADED
-            except Exception:
-                pass
-
         from pywinauto import Desktop
         desktop  = Desktop(backend="uia")
         windows  = desktop.windows()
