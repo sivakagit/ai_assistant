@@ -653,12 +653,12 @@ class OllamaSetupDialog(QDialog):
     def _do_setup(self, model):
 
         try:
-            # The main thread (Qt) has already initialized COM,
-            # so subprocess calls in this background thread should work
+            print("[Setup] Starting Ollama setup...")
             ready = ensure_ollama_ready(model)
+            print(f"[Setup] Ollama ready: {ready}")
 
-        except Exception:
-
+        except Exception as e:
+            print(f"[Setup] Error: {e}")
             ready = False
 
         self._setup_done.emit(ready)
