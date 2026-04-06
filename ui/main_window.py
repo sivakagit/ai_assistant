@@ -251,6 +251,83 @@ def handle_command(user_input):
     return None
 
 
+# ---------- SMART LIVE-DATA DETECTOR ----------
+
+# These patterns reliably indicate the user wants current/external information
+# that the LLM cannot know. Kept minimal and high-precision — no false positives.
+_LIVE_DATA_PATTERNS = [
+    # prices / rates
+    r'\bprice\b', r'\brate\b', r'\bstock\b', r'\bcrypto\b', r'\bcoin\b',
+    r'\binr\b', r'\busd\b', r'\beur\b', r'\bgold\b', r'\bsilver\b',
+    # sports / scores
+    r'\bscore\b', r'\bmatch\b', r'\blive\b', r'\bipl\b', r'\bnfl\b',
+    r'\bnba\b', r'\bfifa\b', r'\bworldcup\b',
+    # news / current events
+    r'\bnews\b', r'\blatest\b', r'\btoday\b', r'\bcurrent\b', r'\bnow\b',
+    r'\bbreaking\b', r'\bupdate\b', r'\brecent\b',
+    # people / places (live lookups)
+    r'\bwho is\b', r'\bwho are\b', r'\bwhere is\b', r'\bwhen is\b',
+    r'\bwhat is the\b', r'\bhow much is\b', r'\bhow many\b',
+    # time-sensitive
+    r'\bforecast\b', r'\btemperature\b', r'\bpopulation\b',
+    r'\belection\b', r'\bresult\b', r'\bwinner\b',
+]
+
+import re as _re
+_LIVE_DATA_RE = _re.compile(
+    "|".join(_LIVE_DATA_PATTERNS), _re.IGNORECASE
+)
+
+# Intents that are always handled locally — never send these to web search
+_LOCAL_INTENTS = {
+    "close_app", "shutdown_pc", "restart_pc", "kill_process",
+    "open_app", "close_external_app", "read_screen", "screenshot",
+    "last_screen", "get_time", "get_date", "system_info",
+    "remember", "show_memory", "schedule_task", "task_management",
+    "search_file", "open_file", "run_python", "file_operation",
+    "clear_conversation", "web_search", "weather",
+    "explain_screen", "read_handwriting",
+}
+
+
+def needs_web_search(message: str, intent: str) -> bool:
+    """
+    Returns True if this query needs live web data.
+
+    Logic (in order):
+    1. If intent is a known local tool → False (handle locally)
+    2. If a registered tool handles it → False
+    3. If a plugin handles it → False
+    4. If intent is 'chat' AND message matches live-data patterns → True
+    5. Otherwise → False (let LLM answer)
+    """
+    # Rule 1: known local intents never need web search
+    if intent in _LOCAL_INTENTS:
+        return False
+
+    # Rule 2: registered tool exists → handle locally
+    if registry.get(intent):
+        return False
+
+    # Rule 3: plugin handles it → handle locally
+    try:
+        if plugin_manager.can_handle(intent):
+            return False
+    except Exception:
+        pass
+
+    # Rule 4: unknown/chat intent + live-data signal in message → search
+    if intent == "chat" and _LIVE_DATA_RE.search(message):
+        return True
+
+    # Rule 5: intent was detected but nothing can handle it → search
+    if intent not in _LOCAL_INTENTS and not registry.get(intent):
+        if _LIVE_DATA_RE.search(message):
+            return True
+
+    return False
+
+
 # ---------- STREAM WORKER ----------
 
 class StreamWorker:
@@ -3084,7 +3161,6 @@ class AssistantUI(CommandPaletteMixin, QWidget):
             return
 
         # ── Plugin dispatch ───────────────────────────────────────────────────
-        # Runs BEFORE handle_command/LLM so plugins get first pick of intents.
         if plugin_manager.can_handle(_intent):
             self.append_assistant("⚡ Running plugin…")
 
@@ -3097,42 +3173,37 @@ class AssistantUI(CommandPaletteMixin, QWidget):
             Thread(target=_do_plugin, daemon=True).start()
             return
 
-        # --- Normal command / chat flow ---
-        # Run handle_command in a background thread so slow tools
-        # (e.g. file search) never freeze the UI.
+        # ── Smart web search — live data queries with no local handler ────────
+        if needs_web_search(message, _intent):
+            self.append_assistant("🌐 Searching online…")
 
-        def _run_tool():
-            tool_response = handle_command(message)
-            if tool_response is not None:
-                self._tool_result_signal.emit(tool_response)
-            else:
-                # No tool matched — fall back to LLM stream on the UI thread
-                # We must call start_stream via the signal so it runs safely.
-                self._tool_result_signal.emit("")  # sentinel: empty = use LLM
+            def _do_auto_search(t=message):
+                try:
+                    tool = registry.get("web_search")
+                    result = tool(t) if tool else "Web search tool not available."
+                except Exception as e:
+                    result = f"Search error: {e}"
+                self._tool_result_signal.emit(result)
 
-        def _on_tool_done(response):
-            if response == "":
-                self.start_stream(message)
-            # non-empty responses are already handled by _on_tool_result
+            Thread(target=_do_auto_search, daemon=True).start()
+            return
 
-        # Temporarily reroute the signal for this call
-        # (simpler: just use a wrapper thread + QTimer for the LLM fallback)
-        _intent_check = detect_intent(message.lower())
-        _is_tool_intent = _intent_check != "chat"
+        # ── Registry tool fallback ────────────────────────────────────────────
+        # Handles any intent that has a registered tool but wasn't caught above
+        if _intent != "chat":
+            self.append_assistant("⚙️ Working on it…")
 
-        if _is_tool_intent:
-            self.append_assistant("Working on it...")
+            def _do_tool(t=message):
+                result = handle_command(t)
+                self._tool_result_signal.emit(
+                    result if result is not None else "⚠️ No response from tool."
+                )
 
-            def _bg():
-                tool_response = handle_command(message)
-                if tool_response is not None:
-                    self._tool_result_signal.emit(tool_response)
-                else:
-                    self._tool_result_signal.emit("\u26a0\ufe0f No response from tool.")
+            Thread(target=_do_tool, daemon=True).start()
+            return
 
-            Thread(target=_bg, daemon=True).start()
-        else:
-            self.start_stream(message)
+        # ── LLM stream — pure conversational fallback ─────────────────────────
+        self.start_stream(message)
 
     def append_user(self, message):
         from PySide6.QtGui import QTextCursor, QTextBlockFormat
