@@ -19,6 +19,15 @@ And must expose a handler function:
 Optionally for multi-intent plugins:
     def handle_intent(intent: str, text: str) -> str: ...
     (if not defined, handle() is used for all registered intents)
+
+Example plugin (plugins/hello_plugin.py):
+    PLUGIN_NAME    = "hello"
+    PLUGIN_INTENTS = ["say_hello", "greet"]
+    PLUGIN_VERSION = "1.0.0"
+    PLUGIN_DESC    = "Says hello to the user"
+
+    def handle(text: str) -> str:
+        return "Hello! How can I help you today?"
 """
 
 import os
@@ -42,8 +51,8 @@ class PluginInfo:
     def __init__(self, name, intents, handler, module,
                  version="1.0.0", author="", desc=""):
         self.name    = name
-        self.intents = intents
-        self.handler = handler
+        self.intents = intents   # list[str]
+        self.handler = handler   # callable(text) -> str
         self.module  = module
         self.version = version
         self.author  = author
@@ -69,15 +78,18 @@ class PluginManager:
     """
 
     def __init__(self, registry=None):
-        self._plugins: dict    = {}       # name -> PluginInfo
-        self._intent_map: dict = {}       # intent -> plugin name
-        self._registry         = registry
-        self._errors: list     = []
+        self._plugins: dict[str, PluginInfo] = {}   # name → PluginInfo
+        self._intent_map: dict[str, str] = {}        # intent → plugin name
+        self._registry = registry                    # tools.registry.ToolRegistry (optional)
+        self._errors: list[str] = []                 # load errors
 
     # ── Discovery & Loading ───────────────────────────────────────────────────
 
     def load_all(self) -> int:
-        """Scan PLUGINS_DIR and load every valid .py plugin file."""
+        """
+        Scan PLUGINS_DIR and load every valid .py plugin file.
+        Returns the number of successfully loaded plugins.
+        """
         if not os.path.isdir(PLUGINS_DIR):
             os.makedirs(PLUGINS_DIR, exist_ok=True)
             logger.info(f"[PluginManager] Created plugins dir: {PLUGINS_DIR}")
@@ -88,7 +100,8 @@ class PluginManager:
             if not filename.endswith(".py") or filename.startswith("_"):
                 continue
             filepath = os.path.join(PLUGINS_DIR, filename)
-            if self._load_file(filepath):
+            ok = self._load_file(filepath)
+            if ok:
                 loaded += 1
 
         logger.info(f"[PluginManager] Loaded {loaded} plugin(s) from {PLUGINS_DIR}")
@@ -108,6 +121,7 @@ class PluginManager:
             self._errors.append(msg)
             return False
 
+        # Validate required attributes
         name    = getattr(module, "PLUGIN_NAME",    None)
         intents = getattr(module, "PLUGIN_INTENTS", None)
 
@@ -123,7 +137,9 @@ class PluginManager:
             self._errors.append(msg)
             return False
 
+        # Resolve handler
         if hasattr(module, "handle_intent"):
+            # Multi-intent handler: handle_intent(intent, text) -> str
             raw_handler = module.handle_intent
             handler = lambda text, intent, rh=raw_handler: rh(intent, text)
         elif hasattr(module, "handle"):
@@ -134,6 +150,7 @@ class PluginManager:
             self._errors.append(msg)
             return False
 
+        # Check for name collision
         if name in self._plugins:
             logger.warning(f"[PluginManager] Plugin '{name}' already loaded — overwriting")
 
@@ -149,6 +166,7 @@ class PluginManager:
 
         self._plugins[name] = info
 
+        # Map each intent → this plugin
         for intent in intents:
             if intent in self._intent_map:
                 logger.warning(
@@ -157,8 +175,10 @@ class PluginManager:
                 )
             self._intent_map[intent] = name
 
+        # Auto-register with tool registry if provided
         if self._registry is not None:
             for intent in intents:
+                # Wrap handler to match registry signature (text) -> str
                 def _make_tool(h, i):
                     def _tool(text):
                         return h(text)
@@ -169,19 +189,22 @@ class PluginManager:
 
         return True
 
-    # ── Reloading ─────────────────────────────────────────────────────────────
+    # ── Reloading ───────────────────────────────────────────────────────────────
 
     def reload_plugin(self, name: str) -> bool:
+        """Reload a single plugin by name. Returns True on success."""
         info = self._plugins.get(name)
         if not info:
             return False
         filepath = info.module.__spec__.origin
+        # Unregister intents
         for intent in info.intents:
             self._intent_map.pop(intent, None)
         del self._plugins[name]
         return self._load_file(filepath)
 
     def reload_all(self) -> int:
+        """Unload everything and reload from disk."""
         self._plugins.clear()
         self._intent_map.clear()
         self._errors.clear()
@@ -190,23 +213,30 @@ class PluginManager:
     # ── Dispatch ──────────────────────────────────────────────────────────────
 
     def can_handle(self, intent: str) -> bool:
+        """Return True if a plugin is registered for this intent."""
         return intent in self._intent_map
 
     def dispatch(self, intent: str, text: str) -> Optional[str]:
+        """
+        Call the plugin registered for intent.
+        Returns the plugin's response string, or None if no plugin matches.
+        """
         plugin_name = self._intent_map.get(intent)
         if not plugin_name:
             return None
         plugin = self._plugins[plugin_name]
         try:
-            return plugin.handler(text)
+            result = plugin.handler(text)
+            return result
         except Exception as e:
             tb = traceback.format_exc()
-            logger.error(f"[PluginManager] Plugin '{plugin_name}' error: {e}\n{tb}")
+            logger.error(f"[PluginManager] Plugin '{plugin_name}' raised error: {e}\n{tb}")
             return f"⚠️ Plugin '{plugin_name}' error: {e}"
 
     # ── Introspection ─────────────────────────────────────────────────────────
 
     def list_plugins(self) -> list:
+        """Return a list of PluginInfo objects for all loaded plugins."""
         return list(self._plugins.values())
 
     def get_plugin(self, name: str) -> Optional[PluginInfo]:
@@ -216,9 +246,11 @@ class PluginManager:
         return list(self._errors)
 
     def intent_owner(self, intent: str) -> Optional[str]:
+        """Return the plugin name that owns an intent, or None."""
         return self._intent_map.get(intent)
 
     def summary(self) -> str:
+        """Human-readable summary of all loaded plugins."""
         if not self._plugins:
             return "No plugins loaded."
         lines = [f"Loaded {len(self._plugins)} plugin(s):\n"]
