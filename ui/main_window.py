@@ -131,9 +131,11 @@ registry.register("kill_process", kill_process)
 
 class StreamSignals(QObject):
 
-    token = Signal(str)
+    token = Signal(str)           # Legacy: raw token
 
-    finished = Signal()
+    chunk = Signal(str)           # New: chunk for progressive UI rendering
+
+    finished = Signal()           # Stream complete
 
 
 # ---------- TOOL RUNNER — timeout + retry + perf logging ----------
@@ -521,6 +523,10 @@ class StreamWorker:
 
                 full_text += token
 
+                # Emit chunk for progressive UI rendering
+                self.signals.chunk.emit(token)
+
+                # Legacy: also emit token (for backwards compat if needed)
                 self.signals.token.emit(token)
 
             add_message("assistant", full_text)
@@ -3759,6 +3765,7 @@ class AssistantUI(CommandPaletteMixin, QWidget):
 
         self._stream_buffer = ""
         self._is_streaming = True
+        self._streaming_first_chunk = True  # Track first chunk for typing indicator removal
 
         from PySide6.QtGui import QTextCursor, QTextBlockFormat
 
@@ -3791,6 +3798,7 @@ class AssistantUI(CommandPaletteMixin, QWidget):
 
         self.worker = StreamWorker(prompt)
         self.worker.signals.token.connect(self.buffer_token)
+        self.worker.signals.chunk.connect(self._append_streaming_chunk)  # Progressive rendering
         self.worker.signals.finished.connect(self.stream_finished)
         Thread(target=self.worker.run, daemon=True).start()
 
@@ -3798,21 +3806,62 @@ class AssistantUI(CommandPaletteMixin, QWidget):
 
         self._stream_buffer += token
 
+    def _was_at_bottom(self) -> bool:
+        """Check if user is viewing the bottom of the chat (for smart auto-scroll)."""
+        sb = self.chat_display.verticalScrollBar()
+        return sb.value() >= (sb.maximum() - 50)  # Within 50px of bottom
+
+    def _append_streaming_chunk(self, chunk: str):
+        """Append streaming chunk directly to chat display for progressive rendering."""
+        if not chunk:
+            return
+
+        from PySide6.QtGui import QTextCursor
+
+        # Remove typing indicator on first chunk
+        if self._streaming_first_chunk:
+            self._streaming_first_chunk = False
+            doc = self.chat_display.document()
+            cursor = QTextCursor(doc)
+
+            # Select from just before typing indicator to end, delete it
+            pos = max(0, self._typing_cursor_pos - 1)
+            cursor.setPosition(pos)
+            cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
+
+            # Position cursor after deleted content for new output
+            cursor.movePosition(QTextCursor.End)
+            self.chat_display.setTextCursor(cursor)
+
+        # Append chunk directly to UI
+        cursor = self.chat_display.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertText(chunk)
+        self.chat_display.setTextCursor(cursor)
+
+        # Auto-scroll if user is at bottom (respect manual scroll up)
+        if self._was_at_bottom():
+            sb = self.chat_display.verticalScrollBar()
+            sb.setValue(sb.maximum())
+
     def stream_finished(self):
 
         self._is_streaming = False
 
-        from PySide6.QtGui import QTextCursor
-        doc = self.chat_display.document()
-        cursor = QTextCursor(doc)
+        # If no chunks were received (error case), remove typing indicator
+        if self._streaming_first_chunk:
+            from PySide6.QtGui import QTextCursor
+            doc = self.chat_display.document()
+            cursor = QTextCursor(doc)
 
-        # Select from just before typing indicator to end, delete it
-        pos = max(0, self._typing_cursor_pos - 1)
-        cursor.setPosition(pos)
-        cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
-        cursor.removeSelectedText()
+            # Select from just before typing indicator to end, delete it
+            pos = max(0, self._typing_cursor_pos - 1)
+            cursor.setPosition(pos)
+            cursor.movePosition(QTextCursor.End, QTextCursor.KeepAnchor)
+            cursor.removeSelectedText()
 
-        self.append_assistant(self._stream_buffer)
+        # TTS: speak the full buffered response (already rendered progressively)
         self._maybe_speak(self._stream_buffer)
         self._stream_buffer = ""
 
