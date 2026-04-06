@@ -632,6 +632,9 @@ class OllamaSetupDialog(QDialog):
 
         outer.addWidget(self.quit_btn)
 
+        # Timeout after 30 seconds - auto-continue if setup hangs
+        QTimer.singleShot(30000, self._on_timeout)
+
         QTimer.singleShot(100, self.run_setup)
 
     def run_setup(self):
@@ -655,13 +658,21 @@ class OllamaSetupDialog(QDialog):
         try:
             # The main thread (Qt) has already initialized COM,
             # so subprocess calls in this background thread should work
+            logger.info(f"[Startup] Starting setup for model: {model}")
             ready = ensure_ollama_ready(model)
+            logger.info(f"[Startup] Setup complete. Ollama ready: {ready}")
 
-        except Exception:
-
+        except Exception as e:
+            logger.error(f"[Startup] Setup failed: {e}", exc_info=True)
             ready = False
 
         self._setup_done.emit(ready)
+
+    def _on_timeout(self):
+        """Force continue if setup takes too long"""
+        logger.warning("[Startup] Setup timeout after 30s - continuing anyway")
+        self._success = True
+        self.accept()
 
     def _on_done(self, ready):
 
@@ -681,7 +692,11 @@ class OllamaSetupDialog(QDialog):
 
             self.progress_bar.setValue(0)
 
-            self.quit_btn.setText("Quit")
+            self.quit_btn.setText("Continue Anyway")
+
+            self.quit_btn.clicked.disconnect()
+
+            self.quit_btn.clicked.connect(self.accept)
 
 
 # ---------- MODEL DOWNLOAD DIALOG ----------
