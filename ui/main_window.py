@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import sys
 import os
 import time
@@ -98,6 +101,11 @@ from ui.command_palette import CommandPaletteMixin
 from core.plugin_manager import plugin_manager
 
 logger = get_logger()
+
+# ── Performance / tool execution constants ────────────────────────────────────
+_TOOL_TIMEOUT_SECONDS        = 15
+_WEB_SEARCH_TIMEOUT_SECONDS  = 30   # web search gets extra time
+_TOOL_MAX_RETRIES            = 2
 # Ensure the project root (E:\Assistant) is on the path so that
 # modules like ollama_setup can be found when this file is imported
 # from a sub-package (ui/).
@@ -125,6 +133,73 @@ class StreamSignals(QObject):
     token = Signal(str)
 
     finished = Signal()
+
+
+# ---------- TOOL RUNNER — timeout + retry + perf logging ----------
+
+def _run_tool_safe(
+    fn,
+    message: str,
+    intent: str,
+    confidence: float,
+    *,
+    timeout: int     = _TOOL_TIMEOUT_SECONDS,
+    max_retries: int = _TOOL_MAX_RETRIES,
+) -> str:
+    """
+    Run a tool function safely with:
+      • Timeout protection  — kills the call after `timeout` seconds
+      • Retry logic         — retries up to `max_retries` times on Exception
+      • Performance logging — logs intent, confidence, duration, and outcome
+
+    Returns a plain string result (or an error message if all retries fail / timeout).
+    """
+    import concurrent.futures
+
+    attempt  = 0
+    last_err = None
+
+    while attempt <= max_retries:
+
+        t_start = time.perf_counter()
+
+        try:
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(fn, message)
+                try:
+                    result = future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    elapsed = time.perf_counter() - t_start
+                    logger.warning(
+                        f"[Tool timeout] intent={intent!r} conf={confidence:.2f} "
+                        f"attempt={attempt+1} elapsed={elapsed:.2f}s"
+                    )
+                    return f"⏱ Tool timed out after {timeout}s. Please try again."
+
+            elapsed = time.perf_counter() - t_start
+            logger.info(
+                f"[Tool OK] intent={intent!r} conf={confidence:.2f} "
+                f"attempt={attempt+1} elapsed={elapsed:.3f}s"
+            )
+            return result if result is not None else "⚠️ Tool returned no response."
+
+        except Exception as e:
+            elapsed  = time.perf_counter() - t_start
+            last_err = e
+            attempt += 1
+            logger.warning(
+                f"[Tool error] intent={intent!r} conf={confidence:.2f} "
+                f"attempt={attempt} elapsed={elapsed:.3f}s error={e!r}"
+            )
+            if attempt <= max_retries:
+                time.sleep(0.4 * attempt)   # short back-off before retry
+
+    logger.error(
+        f"[Tool failed] intent={intent!r} — gave up after {max_retries+1} attempts. "
+        f"last_err={last_err!r}"
+    )
+    return f"⚠️ Tool failed after {max_retries+1} attempt(s): {last_err}"
 
 
 # ---------- SMART MEMORY RETRIEVAL (Step 5) ----------
@@ -238,7 +313,7 @@ def handle_command(user_input):
 
     maybe_store_memory(user_input)
 
-    intent = detect_intent(
+    intent, _confidence = detect_intent(
         user_input.lower()
     )
 
@@ -290,7 +365,7 @@ _LOCAL_INTENTS = {
 }
 
 
-def needs_web_search(message: str, intent: str) -> bool:
+def needs_web_search(message: str, intent: str, confidence: float = 1.0) -> bool:
     """
     Returns True if this query needs live web data.
 
@@ -298,8 +373,9 @@ def needs_web_search(message: str, intent: str) -> bool:
     1. If intent is a known local tool → False (handle locally)
     2. If a registered tool handles it → False
     3. If a plugin handles it → False
-    4. If intent is 'chat' AND message matches live-data patterns → True
-    5. Otherwise → False (let LLM answer)
+    4. If confidence is low AND message matches live-data patterns → True
+    5. If intent was detected but nothing can handle it + live-data signal → True
+    6. Otherwise → False (let LLM answer)
     """
     # Rule 1: known local intents never need web search
     if intent in _LOCAL_INTENTS:
@@ -316,11 +392,15 @@ def needs_web_search(message: str, intent: str) -> bool:
     except Exception:
         pass
 
-    # Rule 4: unknown/chat intent + live-data signal in message → search
+    # Rule 4: low-confidence intent + live-data signal in message → search
+    if confidence < 0.6 and _LIVE_DATA_RE.search(message):
+        return True
+
+    # Rule 5: chat intent + live-data signal → search
     if intent == "chat" and _LIVE_DATA_RE.search(message):
         return True
 
-    # Rule 5: intent was detected but nothing can handle it → search
+    # Rule 6: unhandled non-local intent + live-data signal → search
     if intent not in _LOCAL_INTENTS and not registry.get(intent):
         if _LIVE_DATA_RE.search(message):
             return True
@@ -2426,6 +2506,10 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         self.chat_display.setReadOnly(True)
         self.chat_display.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.chat_display.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # Reposition copy buttons whenever the user scrolls
+        self.chat_display.verticalScrollBar().valueChanged.connect(
+            self._reposition_copy_buttons
+        )
         self.chat_display.setStyleSheet("""
             QTextEdit {
                 background-color: #0d1117;
@@ -3038,7 +3122,12 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         # ── Intent engine routing ─────────────────────────────────────────────
         from core.intent_engine import detect_intent as _detect
 
-        _intent = _detect(msg_lower)
+        _t_intent = time.perf_counter()
+        _intent, _confidence = _detect(msg_lower)
+        logger.info(
+            f"[Intent] text={message[:60]!r} → intent={_intent!r} "
+            f"conf={_confidence:.2f} detect_ms={(time.perf_counter()-_t_intent)*1000:.1f}"
+        )
 
         if _intent == "close_app":
 
@@ -3142,7 +3231,9 @@ class AssistantUI(CommandPaletteMixin, QWidget):
 
             def _do_web_search():
                 from tools.web_search_tool import web_search_tool as _wst
-                result = _wst(message)
+                result = _run_tool_safe(
+                    _wst, message, "web_search", _confidence
+                )
                 self._tool_result_signal.emit(result)
 
             Thread(target=_do_web_search, daemon=True).start()
@@ -3154,7 +3245,9 @@ class AssistantUI(CommandPaletteMixin, QWidget):
 
             def _do_weather():
                 from tools.weather_tool import weather_tool as _wt
-                result = _wt(message)
+                result = _run_tool_safe(
+                    _wt, message, "weather", _confidence
+                )
                 self._tool_result_signal.emit(result)
 
             Thread(target=_do_weather, daemon=True).start()
@@ -3174,15 +3267,17 @@ class AssistantUI(CommandPaletteMixin, QWidget):
             return
 
         # ── Smart web search — live data queries with no local handler ────────
-        if needs_web_search(message, _intent):
+        if needs_web_search(message, _intent, _confidence):
             self.append_assistant("🌐 Searching online…")
 
-            def _do_auto_search(t=message):
-                try:
-                    tool = registry.get("web_search")
-                    result = tool(t) if tool else "Web search tool not available."
-                except Exception as e:
-                    result = f"Search error: {e}"
+            def _do_auto_search(t=message, i=_intent, c=_confidence):
+                tool = registry.get("web_search")
+                if not tool:
+                    self._tool_result_signal.emit("Web search tool not available.")
+                    return
+                result = _run_tool_safe(tool, t, i, c,
+                    timeout=_WEB_SEARCH_TIMEOUT_SECONDS,
+                )
                 self._tool_result_signal.emit(result)
 
             Thread(target=_do_auto_search, daemon=True).start()
@@ -3481,10 +3576,20 @@ class AssistantUI(CommandPaletteMixin, QWidget):
             f'line-height:1.65; white-space:normal; word-wrap:break-word; max-width:620px;">{rich_html}</td></tr></table>'
         )
 
-        # ── Copy button — floating overlay ────────────────────────────────────
-        self._add_copy_button(message)
+        # ── Copy button — inline below bubble, always visible ─────────────────
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertBlock()
+        copy_row = QTextBlockFormat()
+        copy_row.setAlignment(Qt.AlignLeft)
+        copy_row.setTopMargin(2)
+        copy_row.setBottomMargin(6)
+        cursor.setBlockFormat(copy_row)
+        # Anchor so we can position the button here
+        cursor.insertHtml('<span style="color:transparent; font-size:1px;">&#8203;</span>')
+        self._add_copy_button_inline(message, cursor.position())
 
         # Reset block
+        cursor.movePosition(QTextCursor.End)
         cursor.insertBlock()
         reset = QTextBlockFormat()
         reset.setAlignment(Qt.AlignLeft)
@@ -3497,83 +3602,91 @@ class AssistantUI(CommandPaletteMixin, QWidget):
             self.chat_display.verticalScrollBar().maximum()
         )
 
-    def _add_copy_button(self, message: str):
-        """Add a small floating copy button that appears over the last assistant bubble."""
+    def _add_copy_button_inline(self, message: str, anchor_pos: int):
+        """
+        Add a copy button that sits permanently below each assistant bubble,
+        positioned using the text cursor anchor — just like ChatGPT / Claude.
+        """
         from PySide6.QtWidgets import QApplication as _QApp
 
-        btn = QPushButton("⎘ Copy", self.chat_display)
-        btn.setFixedSize(64, 24)
-        btn.setStyleSheet("""
+        _STYLE_DEFAULT = """
             QPushButton {
-                background-color: #21262d;
-                color: #8b949e;
+                background-color: transparent;
+                color: #555e6d;
                 border: 1px solid #30363d;
                 border-radius: 5px;
-                font-size: 10px;
-                font-weight: 500;
+                font-size: 11px;
+                padding: 1px 8px;
             }
             QPushButton:hover {
-                background-color: #7c3aed;
-                color: #ffffff;
+                background-color: #21262d;
+                color: #e6edf3;
                 border-color: #7c3aed;
             }
-        """)
+        """
+        _STYLE_COPIED = """
+            QPushButton {
+                background-color: #0d3321;
+                color: #3fb950;
+                border: 1px solid #238636;
+                border-radius: 5px;
+                font-size: 11px;
+                padding: 1px 8px;
+            }
+        """
 
-        _msg = message   # capture for closure
+        btn = QPushButton("⎘ Copy", self.chat_display)
+        btn.setFixedSize(70, 22)
+        btn.setStyleSheet(_STYLE_DEFAULT)
+        btn.setCursor(Qt.PointingHandCursor)
+
+        _msg = message
 
         def _copy():
             _QApp.clipboard().setText(_msg)
             btn.setText("✓ Copied")
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #0d3321;
-                    color: #3fb950;
-                    border: 1px solid #238636;
-                    border-radius: 5px;
-                    font-size: 10px;
-                    font-weight: 500;
-                }
-            """)
-            QTimer.singleShot(1500, lambda: (
+            btn.setStyleSheet(_STYLE_COPIED)
+            QTimer.singleShot(1800, lambda: (
                 btn.setText("⎘ Copy"),
-                btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #21262d;
-                        color: #8b949e;
-                        border: 1px solid #30363d;
-                        border-radius: 5px;
-                        font-size: 10px;
-                        font-weight: 500;
-                    }
-                    QPushButton:hover {
-                        background-color: #7c3aed;
-                        color: #ffffff;
-                        border-color: #7c3aed;
-                    }
-                """)
+                btn.setStyleSheet(_STYLE_DEFAULT),
             ))
 
         btn.clicked.connect(_copy)
 
-        # Position: top-right of the chat_display viewport, just below top edge
-        vp = self.chat_display.viewport()
-        x = vp.width() - btn.width() - 12
-        y = vp.height() - btn.height() - 12
-        btn.move(x, y)
+        # Position button using the cursor rect at the anchor position
+        doc_cursor = self.chat_display.textCursor()
+        doc_cursor.setPosition(anchor_pos)
+        rect = self.chat_display.cursorRect(doc_cursor)
+        btn.move(rect.x(), rect.y())
         btn.raise_()
         btn.show()
 
-        # Store reference so old buttons can be repositioned on resize
+        # Track all buttons so we can clean up old ones (keep last 30)
         if not hasattr(self, "_copy_buttons"):
             self._copy_buttons = []
-        # Keep only last 20
-        self._copy_buttons.append(btn)
-        if len(self._copy_buttons) > 20:
-            old = self._copy_buttons.pop(0)
-            old.deleteLater()
+        self._copy_buttons.append((btn, anchor_pos))
+        if len(self._copy_buttons) > 30:
+            old_btn, _ = self._copy_buttons.pop(0)
+            old_btn.deleteLater()
 
-        # Auto-hide after 4 seconds
-        QTimer.singleShot(4000, lambda: btn.hide() if btn else None)
+    # Keep old method name as alias so nothing else breaks
+    def _add_copy_button(self, message: str):
+        pass
+
+    def _reposition_copy_buttons(self):
+        """Reposition all copy buttons when the chat is scrolled or resized."""
+        if not hasattr(self, "_copy_buttons"):
+            return
+        for btn, anchor_pos in self._copy_buttons:
+            if not btn or not btn.isVisible():
+                continue
+            try:
+                doc_cursor = self.chat_display.textCursor()
+                doc_cursor.setPosition(anchor_pos)
+                rect = self.chat_display.cursorRect(doc_cursor)
+                btn.move(rect.x(), rect.y())
+            except Exception:
+                pass
 
     def start_stream(self, prompt):
 

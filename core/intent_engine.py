@@ -1,4 +1,9 @@
 def detect_intent(text):
+    """
+    Detect intent from user text.
+    Returns: (intent: str, confidence: float)
+    confidence ranges from 0.0 (unknown) to 1.0 (certain).
+    """
 
     text = text.lower().strip()
 
@@ -12,7 +17,7 @@ def detect_intent(text):
 
     ]:
 
-        return "exit"
+        return "exit", 1.0
 
 
 
@@ -20,7 +25,7 @@ def detect_intent(text):
 
     if text.startswith("remember"):
 
-        return "remember"
+        return "remember", 0.97
 
     if any(
 
@@ -33,7 +38,7 @@ def detect_intent(text):
 
     ):
 
-        return "show_memory"
+        return "show_memory", 0.97
 
 
 
@@ -51,7 +56,7 @@ def detect_intent(text):
 
     ):
 
-        return "task_management"
+        return "task_management", 0.95
 
 
 
@@ -68,7 +73,7 @@ def detect_intent(text):
 
     ):
 
-        return "task_management"
+        return "task_management", 0.95
 
 
 
@@ -84,7 +89,7 @@ def detect_intent(text):
 
     ):
 
-        return "task_management"
+        return "task_management", 0.95
 
 
 
@@ -92,7 +97,7 @@ def detect_intent(text):
 
     if text.startswith("remind me"):
 
-        return "schedule_task"
+        return "schedule_task", 0.97
 
     if " in " in text and any(
 
@@ -105,11 +110,11 @@ def detect_intent(text):
 
     ):
 
-        return "schedule_task"
+        return "schedule_task", 0.85
 
     if "every" in text:
 
-        return "schedule_task"
+        return "schedule_task", 0.80
 
     if " at " in text and any(
 
@@ -123,7 +128,7 @@ def detect_intent(text):
 
     ):
 
-        return "schedule_task"
+        return "schedule_task", 0.88
 
 
 
@@ -145,11 +150,11 @@ def detect_intent(text):
         "forecast for",
         "forecast in",
     ]):
-        return "weather"
+        return "weather", 0.97
 
     # plain "weather" as its own word — avoid matching "whether"
     if text == "weather" or text.startswith("weather "):
-        return "weather"
+        return "weather", 0.95
 
 
 
@@ -169,7 +174,7 @@ def detect_intent(text):
         "browse for",
         "internet search",
     ]):
-        return "web_search"
+        return "web_search", 0.95
 
 
 
@@ -178,11 +183,11 @@ def detect_intent(text):
     # but "find file X" / "locate X" still hits search_file.
 
     if text.startswith(("find file", "locate ", "search file")):
-        return "search_file"
+        return "search_file", 0.95
 
     # Generic "find" / "search" with no web-search trigger → file search
     if text.startswith(("find ", "search ")):
-        return "search_file"
+        return "search_file", 0.80
 
 
 
@@ -190,7 +195,7 @@ def detect_intent(text):
 
     if text.startswith("open file"):
 
-        return "open_file"
+        return "open_file", 0.97
 
 
 
@@ -208,7 +213,7 @@ def detect_intent(text):
 
     ):
 
-        return "run_python"
+        return "run_python", 0.92
 
 
 
@@ -226,7 +231,7 @@ def detect_intent(text):
 
     ):
 
-        return "file_operation"
+        return "file_operation", 0.95
 
 
 
@@ -244,7 +249,7 @@ def detect_intent(text):
     if any(trigger in text for trigger in _close_triggers) and \
        any(app in text for app in _known_apps):
 
-        return "close_external_app"
+        return "close_external_app", 0.95
 
 
 
@@ -255,7 +260,7 @@ def detect_intent(text):
     if any(trigger in text for trigger in _open_triggers) and \
        any(app in text for app in _known_apps):
 
-        return "open_app"
+        return "open_app", 0.95
 
 
 
@@ -272,7 +277,7 @@ def detect_intent(text):
 
     ):
 
-        return "system_info"
+        return "system_info", 0.97
 
 
 
@@ -294,7 +299,7 @@ def detect_intent(text):
 
     ):
 
-        return "get_time"
+        return "get_time", 1.0
 
 
 
@@ -316,7 +321,7 @@ def detect_intent(text):
 
     ):
 
-        return "get_date"
+        return "get_date", 1.0
 
 
 
@@ -324,19 +329,19 @@ def detect_intent(text):
 
     if "close" in text and "app" in text:
 
-        return "close_app"
+        return "close_app", 0.92
 
     if "shutdown" in text:
 
-        return "shutdown_pc"
+        return "shutdown_pc", 1.0
 
     if "restart" in text:
 
-        return "restart_pc"
+        return "restart_pc", 1.0
 
     if "kill" in text:
 
-        return "kill_process"
+        return "kill_process", 0.95
 
     # ---------- ACCESSIBILITY NAVIGATION ----------
 
@@ -345,47 +350,47 @@ def detect_intent(text):
         "current item",
         "what is selected"
     ]:
-        return "read_focus"
+        return "read_focus", 1.0
 
     if text in [
         "next",
         "next item",
         "next element"
     ]:
-        return "next_element"
+        return "next_element", 1.0
 
     if text in [
         "previous",
         "previous item",
         "go back"
     ]:
-        return "previous_element"
+        return "previous_element", 1.0
 
     if text in [
         "click",
         "activate",
         "press enter"
     ]:
-        return "activate_element"
+        return "activate_element", 1.0
 
     if text.startswith("type "):
-        return "type_text"
+        return "type_text", 0.97
 
     if text in [
         "scroll down"
     ]:
-        return "scroll_down"
+        return "scroll_down", 1.0
 
     if text in [
         "scroll up"
     ]:
-        return "scroll_up"
+        return "scroll_up", 1.0
 
     if text in [
         "where am i",
         "current window"
     ]:
-        return "where_am_i"
+        return "where_am_i", 1.0
 
     # ---------- SCREEN READER ----------
 
@@ -411,7 +416,7 @@ def detect_intent(text):
         "read left half",
         "read right half",
     ]):
-        return "read_screen"
+        return "read_screen", 0.97
 
     if any(phrase in text for phrase in [
         "take a screenshot",
@@ -420,7 +425,7 @@ def detect_intent(text):
         "save screenshot",
         "screenshot",
     ]):
-        return "screenshot"
+        return "screenshot", 1.0
 
     if any(phrase in text for phrase in [
         "what did my screen say",
@@ -428,7 +433,7 @@ def detect_intent(text):
         "previous screen text",
         "show last screen",
     ]):
-        return "last_screen"
+        return "last_screen", 0.97
 
     # ---------- FALLBACK TOOL MATCH ----------
     # If nothing matched above, check if any registered tool name appears in the text.
@@ -436,10 +441,10 @@ def detect_intent(text):
         from tools.registry import registry as _registry
         for name in _registry.tools:
             if name in text:
-                return name
+                return name, 0.70
     except Exception:
         pass
 
     # ---------- DEFAULT ----------
 
-    return "chat"
+    return "chat", 0.40
