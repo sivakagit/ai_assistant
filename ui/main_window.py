@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()
+
 
 import sys
 import os
@@ -99,7 +99,7 @@ from models.downloader import (
 from core.logger import get_logger
 from ui.command_palette import CommandPaletteMixin
 from core.plugin_manager import plugin_manager
-
+load_dotenv()
 logger = get_logger()
 
 # ── Performance / tool execution constants ────────────────────────────────────
@@ -678,6 +678,7 @@ class ModelDownloadDialog(QDialog):
 
         self.model_sizes = {
             "qwen2.5:3b": 1.9,
+            "qwen2.5:7b": 4.4,
             "phi3:mini":  2.3,
             "mistral:7b": 4.1,
             "llama3:8b":  4.7,
@@ -771,6 +772,7 @@ class ModelDownloadDialog(QDialog):
 
         self.model_dropdown.addItems([
             "qwen2.5:3b  \u2014  1.9 GB",
+            "qwen2.5:7b  \u2014  4.4 GB",
             "phi3:mini   \u2014  2.3 GB",
             "mistral:7b  \u2014  4.1 GB",
             "llama3:8b   \u2014  4.7 GB",
@@ -4729,7 +4731,7 @@ class AssistantUI(CommandPaletteMixin, QWidget):
             if reply == QMessageBox.Yes:
                 dialog = ModelDownloadDialog(
                     preselect_model=selected_model,
-                    lock_model=True
+                    lock_model=False
                 )
                 dialog.exec()
 
