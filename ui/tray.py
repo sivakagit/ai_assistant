@@ -33,7 +33,12 @@ class TrayManager:
 
         self.tray_icon.setIcon(icon)
 
-        self.tray_icon.setToolTip("Assistant")
+        try:
+            from core.config import get_setting
+            hotkey = get_setting("global_hotkey") or "ctrl+shift+space"
+            self.tray_icon.setToolTip(f"Nova AI  •  {hotkey.upper()} to toggle")
+        except Exception:
+            self.tray_icon.setToolTip("Nova AI")
 
         self.menu = QMenu()
 

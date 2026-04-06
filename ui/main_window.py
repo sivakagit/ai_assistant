@@ -99,6 +99,7 @@ from models.downloader import (
 from core.logger import get_logger
 from ui.command_palette import CommandPaletteMixin
 from core.plugin_manager import plugin_manager
+from services.hotkey_service import HotkeyService, DEFAULT_HOTKEY
 load_dotenv()
 logger = get_logger()
 
@@ -1771,6 +1772,14 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         except Exception as e:
             logger.warning(f"[Startup] Plugin load failed: {e}")
 
+        # ── Global hotkey (Ctrl+Shift+Space by default) ───────────────────────
+        try:
+            self._hotkey_service = HotkeyService(self.toggle_window)
+            self._hotkey_service.start()
+            logger.info(f"[Startup] Global hotkey active: {self._hotkey_service.current}")
+        except Exception as e:
+            logger.warning(f"[Startup] Global hotkey init failed: {e}")
+
     def _on_screen_result(self, display: str):
 
         self.append_assistant(display)
@@ -2020,6 +2029,18 @@ class AssistantUI(CommandPaletteMixin, QWidget):
 
             logger.exception("Tray initialization failed:", e)
 
+    def toggle_window(self):
+        """Show the window if hidden/minimised; hide it if currently visible."""
+        if self.isVisible() and not self.isMinimized():
+            self.hide()
+        else:
+            self.show()
+            self.setWindowState(
+                self.windowState() & ~Qt.WindowMinimized | Qt.WindowActive
+            )
+            self.raise_()
+            self.activateWindow()
+
     def apply_styles(self):
 
         self.setStyleSheet("""
@@ -2151,6 +2172,12 @@ class AssistantUI(CommandPaletteMixin, QWidget):
             )
 
         else:
+
+            # Stop the global hotkey listener cleanly before exit
+            try:
+                self._hotkey_service.stop()
+            except Exception:
+                pass
 
             event.accept()
 
@@ -2288,6 +2315,54 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         """)
         header_layout.addWidget(sched_pill)
         header_layout.addSpacing(10)
+
+        # Voice toggle button in header
+        self.tts_toggle_btn = QPushButton("🔊  Voice On")
+        self.tts_toggle_btn.setFixedHeight(34)
+        self.tts_toggle_btn.setCursor(Qt.PointingHandCursor)
+        self.tts_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #161b22;
+                color: #8b949e;
+                border: 1px solid #30363d;
+                padding: 0 12px;
+                border-radius: 8px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #21262d;
+                color: #e6edf3;
+                border-color: #484f58;
+            }
+        """)
+        self.tts_toggle_btn.setToolTip("Toggle voice on/off")
+        self.tts_toggle_btn.clicked.connect(self._toggle_tts)
+        header_layout.addWidget(self.tts_toggle_btn)
+        header_layout.addSpacing(6)
+
+        # Exit button in header
+        from core.shutdown_manager import shutdown as _shutdown_fn
+        _exit_btn = QPushButton("✕  Exit")
+        _exit_btn.setFixedHeight(34)
+        _exit_btn.setCursor(Qt.PointingHandCursor)
+        _exit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #161b22;
+                color: #8b949e;
+                border: 1px solid #30363d;
+                padding: 0 14px;
+                border-radius: 8px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #2a1515;
+                color: #f85149;
+                border-color: #6e2a2a;
+            }
+        """)
+        _exit_btn.clicked.connect(_shutdown_fn)
+        header_layout.addWidget(_exit_btn)
+        header_layout.addSpacing(6)
 
         # Bell
         bell_btn = QPushButton("🔔")
@@ -2630,31 +2705,10 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         self._autocomplete_popup.itemClicked.connect(self._on_autocomplete_select)
         self._autocomplete_popup.raise_()
 
-        # ── Bottom bar: Voice | hint | Exit ──────────────────────────────────
+        # ── Bottom hint label ─────────────────────────────────────────────────
         action_row = QHBoxLayout()
         action_row.setSpacing(0)
         action_row.setContentsMargins(2, 0, 2, 0)
-
-        self.tts_toggle_btn = QPushButton("🔊  Voice On")
-        self.tts_toggle_btn.setFixedHeight(26)
-        self.tts_toggle_btn.setCursor(Qt.PointingHandCursor)
-        self.tts_toggle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #484f58;
-                border: 1px solid #21262d;
-                padding: 0 12px;
-                border-radius: 6px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #161b22;
-                color: #8b949e;
-                border-color: #30363d;
-            }
-        """)
-        self.tts_toggle_btn.setToolTip("Toggle voice on/off")
-        self.tts_toggle_btn.clicked.connect(self._toggle_tts)
 
         hint_lbl = QLabel("Enter to send  ·  type for suggestions")
         hint_lbl.setStyleSheet(
@@ -2662,32 +2716,9 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         )
         hint_lbl.setAlignment(Qt.AlignCenter)
 
-        from core.shutdown_manager import shutdown
-        exit_button = QPushButton("Exit")
-        exit_button.setFixedHeight(26)
-        exit_button.setCursor(Qt.PointingHandCursor)
-        exit_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #484f58;
-                border: 1px solid #21262d;
-                padding: 0 14px;
-                border-radius: 6px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #2a1515;
-                color: #f85149;
-                border-color: #6e2a2a;
-            }
-        """)
-        exit_button.clicked.connect(shutdown)
-
-        action_row.addWidget(self.tts_toggle_btn)
         action_row.addStretch()
         action_row.addWidget(hint_lbl)
         action_row.addStretch()
-        action_row.addWidget(exit_button)
         input_outer.addLayout(action_row)
 
         layout.addWidget(input_frame)
@@ -3659,7 +3690,8 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         doc_cursor = self.chat_display.textCursor()
         doc_cursor.setPosition(anchor_pos)
         rect = self.chat_display.cursorRect(doc_cursor)
-        btn.move(rect.x(), rect.y())
+        # Use a fixed left indent matching the bubble's padding (48px chat padding)
+        btn.move(48, rect.y())
         btn.raise_()
         btn.show()
 
@@ -3686,7 +3718,7 @@ class AssistantUI(CommandPaletteMixin, QWidget):
                 doc_cursor = self.chat_display.textCursor()
                 doc_cursor.setPosition(anchor_pos)
                 rect = self.chat_display.cursorRect(doc_cursor)
-                btn.move(rect.x(), rect.y())
+                btn.move(48, rect.y())
             except Exception:
                 pass
 
@@ -4616,6 +4648,49 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         )
         _divider()
 
+        # ── Global Hotkey ─────────────────────────────────────────────────────
+        _section("⌨️  Global Hotkey", "Press this key combo anywhere to show / hide Nova")
+        hotkey_row = QWidget()
+        hotkey_row.setStyleSheet("background: transparent;")
+        hotkey_hl = QHBoxLayout(hotkey_row)
+        hotkey_hl.setContentsMargins(0, 0, 0, 0)
+        hotkey_hl.setSpacing(10)
+
+        self.setting_hotkey_input = QLineEdit()
+        self.setting_hotkey_input.setText(
+            config.get("global_hotkey", DEFAULT_HOTKEY)
+        )
+        self.setting_hotkey_input.setPlaceholderText("e.g. ctrl+shift+space")
+        self.setting_hotkey_input.setStyleSheet("""
+            QLineEdit {
+                background: #161b22; color: #c9d1d9; border: 1px solid #30363d;
+                border-radius: 6px; padding: 6px 10px; font-size: 13px;
+            }
+            QLineEdit:focus { border-color: #7c3aed; }
+        """)
+        self.setting_hotkey_input.setFixedHeight(34)
+
+        hotkey_reset = QPushButton("Reset")
+        hotkey_reset.setFixedHeight(34)
+        hotkey_reset.setFixedWidth(64)
+        hotkey_reset.setStyleSheet("""
+            QPushButton { background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+                border-radius: 6px; font-size: 12px; }
+            QPushButton:hover { background: #30363d; }
+        """)
+        hotkey_reset.clicked.connect(
+            lambda: self.setting_hotkey_input.setText(DEFAULT_HOTKEY)
+        )
+
+        hotkey_hl.addWidget(self.setting_hotkey_input)
+        hotkey_hl.addWidget(hotkey_reset)
+        layout.addWidget(hotkey_row)
+
+        hotkey_hint = QLabel("Use + between keys: ctrl+shift+space  •  alt+f1  •  ctrl+alt+n")
+        hotkey_hint.setStyleSheet("color: #484f58; font-size: 11px; margin-top: 4px;")
+        layout.addWidget(hotkey_hint)
+        _divider()
+
         # ── Notifications ─────────────────────────────────────────────────────
         _section("🔔  Notifications")
         self.setting_tray_notif = _row_checkbox(
@@ -4707,6 +4782,14 @@ class AssistantUI(CommandPaletteMixin, QWidget):
         # Notifications
         config["tray_notifications"]     = self.setting_tray_notif.isChecked()
         config["task_sound"]             = self.setting_task_sound.isChecked()
+
+        # Global hotkey
+        new_hotkey = self.setting_hotkey_input.text().strip().lower() or DEFAULT_HOTKEY
+        config["global_hotkey"] = new_hotkey
+        try:
+            self._hotkey_service.update(new_hotkey)
+        except Exception:
+            pass
 
         # Appearance
         config["compact_bubbles"]        = self.setting_compact.isChecked()
